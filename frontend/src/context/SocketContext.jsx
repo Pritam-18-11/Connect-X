@@ -40,7 +40,7 @@ export function SocketProvider({ children }) {
       socketRef.current = null
     }
 
-    const s = io('http://localhost:5000', {
+    const s = io(import.meta.env.VITE_API_URL, {
       auth: {
         token,
       },
