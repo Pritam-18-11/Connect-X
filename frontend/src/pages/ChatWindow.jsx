@@ -74,7 +74,7 @@ function Modal({ children, onClose }) {
 export default function ChatWindow() {
   const { userId: otherUserId } = useParams()
   const { user } = useAuth()
-  const { socket, onlineUsers } = useSocket()
+  const { socket, onlineUsers, clearUnread } = useSocket()
   const navigate = useNavigate()
 
   const [messages, setMessages] = useState([])
@@ -102,9 +102,13 @@ export default function ChatWindow() {
   const bottomRef = useRef(null)
   const typingTimeoutRef = useRef(null)
 
-  // Always string for reliable comparison
   const currentUserId = String(user?.id || user?._id || '')
   const isOnline = onlineUsers.includes(otherUserId)
+
+  // Chat open হলে unread dot clear করো
+  useEffect(() => {
+    if (otherUserId) clearUnread(otherUserId)
+  }, [otherUserId])
 
   useEffect(() => {
     const fetchData = async () => {
@@ -151,6 +155,8 @@ export default function ChatWindow() {
       if (msg.senderId === otherUserId || msg.receiverId === otherUserId) {
         setMessages((prev) => [...prev, msg])
         socket.emit('mark_seen', { messageId: msg._id, senderId: msg.senderId })
+        // Chat window খোলা আছে, তাই receive হলেই clear করো
+        clearUnread(otherUserId)
       }
     }
     const handleSent = (msg) => {

@@ -9,31 +9,31 @@ export function SocketProvider({ children }) {
 
   const [socket, setSocket] = useState(null)
   const [onlineUsers, setOnlineUsers] = useState([])
+  const [unreadChats, setUnreadChats] = useState({})
+  const [unreadGroups, setUnreadGroups] = useState({})
 
   const socketRef = useRef(null)
 
   useEffect(() => {
-    // If user logs out → cleanup everything
     if (!user) {
       if (socketRef.current) {
         socketRef.current.removeAllListeners()
         socketRef.current.disconnect()
         socketRef.current = null
       }
-
       setSocket(null)
       setOnlineUsers([])
+      setUnreadChats({})
+      setUnreadGroups({})
       return
     }
 
     const token = sessionStorage.getItem('token')
-
     if (!token) {
       console.warn('⚠️ No token found for socket connection')
       return
     }
 
-    // Prevent duplicate socket connections
     if (socketRef.current) {
       socketRef.current.removeAllListeners()
       socketRef.current.disconnect()
@@ -41,9 +41,7 @@ export function SocketProvider({ children }) {
     }
 
     const s = io(import.meta.env.VITE_API_URL, {
-      auth: {
-        token,
-      },
+      auth: { token },
       transports: ['websocket'],
       autoConnect: true,
       reconnection: true,
@@ -54,51 +52,86 @@ export function SocketProvider({ children }) {
     socketRef.current = s
     setSocket(s)
 
-    s.on('connect', () => {
-      console.log('✅ Socket connected:', s.id)
-    })
-
-    s.on('disconnect', (reason) => {
-      console.log('❌ Socket disconnected:', reason)
-    })
-
-    s.on('connect_error', (err) => {
-      console.error('❌ Socket connection error:', err.message)
-    })
+    s.on('connect', () => console.log('✅ Socket connected:', s.id))
+    s.on('disconnect', (reason) => console.log('❌ Socket disconnected:', reason))
+    s.on('connect_error', (err) => console.error('❌ Socket connection error:', err.message))
 
     s.on('user_online', ({ userId }) => {
-      setOnlineUsers((prev) => {
-        if (prev.includes(userId)) return prev
-        return [...prev, userId]
-      })
+      setOnlineUsers((prev) => prev.includes(userId) ? prev : [...prev, userId])
     })
 
     s.on('user_offline', ({ userId }) => {
-      setOnlineUsers((prev) =>
-        prev.filter((id) => id !== userId)
-      )
+      setOnlineUsers((prev) => prev.filter((id) => id !== userId))
     })
 
-    // Cleanup on unmount or user switch
+    // Private chat unread
+    s.on('receive_message', (msg) => {
+      const senderId = typeof msg.senderId === 'object'
+        ? msg.senderId?._id?.toString()
+        : msg.senderId?.toString()
+
+      if (senderId) {
+        setUnreadChats((prev) => ({ ...prev, [senderId]: true }))
+      }
+    })
+
+    // Group chat unread
+    s.on('receive_group_message', (msg) => {
+      const groupId = typeof msg.groupId === 'object'
+        ? msg.groupId?._id?.toString()
+        : msg.groupId?.toString()
+
+      const senderId = typeof msg.senderId === 'object'
+        ? msg.senderId?._id?.toString()
+        : msg.senderId?.toString()
+
+      // নিজের message এ dot দেখাবে না
+      const currentUserId = String(user?.id || user?._id || '')
+      if (groupId && senderId !== currentUserId) {
+        setUnreadGroups((prev) => ({ ...prev, [groupId]: true }))
+      }
+    })
+
     return () => {
       if (s) {
         s.removeAllListeners()
         s.disconnect()
       }
-
       socketRef.current = null
       setSocket(null)
       setOnlineUsers([])
+      setUnreadChats({})
+      setUnreadGroups({})
     }
   }, [user])
 
+  const clearUnread = (userId) => {
+    setUnreadChats((prev) => {
+      if (!prev[userId]) return prev
+      const next = { ...prev }
+      delete next[userId]
+      return next
+    })
+  }
+
+  const clearUnreadGroup = (groupId) => {
+    setUnreadGroups((prev) => {
+      if (!prev[groupId]) return prev
+      const next = { ...prev }
+      delete next[groupId]
+      return next
+    })
+  }
+
   return (
-    <SocketContext.Provider
-      value={{
-        socket,
-        onlineUsers,
-      }}
-    >
+    <SocketContext.Provider value={{
+      socket,
+      onlineUsers,
+      unreadChats,
+      clearUnread,
+      unreadGroups,
+      clearUnreadGroup,
+    }}>
       {children}
     </SocketContext.Provider>
   )

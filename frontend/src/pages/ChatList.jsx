@@ -8,7 +8,7 @@ import { MessageSquare, ShieldOff } from 'lucide-react'
 export default function ChatList() {
   const [connections, setConnections] = useState([])
   const [loading, setLoading] = useState(true)
-  const { onlineUsers } = useSocket()
+  const { onlineUsers, unreadChats } = useSocket()
 
   useEffect(() => {
     const fetchConnections = async () => {
@@ -50,6 +50,8 @@ export default function ChatList() {
           <div className="space-y-2">
             {connections.map((conn) => {
               const isOnline = onlineUsers.includes(conn.userId?.toString())
+              const hasUnread = !!unreadChats[conn.userId?.toString()]
+
               return (
                 <Link
                   key={conn.userId}
@@ -64,12 +66,18 @@ export default function ChatList() {
                       <span className="absolute bottom-0 right-0 w-3 h-3 bg-success rounded-full border-2 border-panel shadow-[0_0_6px_rgba(16,185,129,0.7)]" />
                     )}
                   </div>
+
                   <div className="flex-1 min-w-0">
                     <p className="text-text font-medium text-sm">{conn.name}</p>
                     <p className="text-text-dim text-xs font-mono">
                       {isOnline ? 'Online' : 'Offline'}
                     </p>
                   </div>
+
+                  {/* Unread green dot — chat এর ডান পাশে */}
+                  {hasUnread && (
+                    <span className="shrink-0 w-3.5 h-3.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)]" />
+                  )}
                 </Link>
               )
             })}

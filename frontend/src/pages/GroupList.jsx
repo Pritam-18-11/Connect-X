@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AppLayout from '../components/AppLayout'
 import api from '../utils/api'
+import { useSocket } from '../context/SocketContext'
 import { Users, Plus, KeyRound, X, AlertCircle } from 'lucide-react'
 
 export default function GroupList() {
@@ -14,6 +15,7 @@ export default function GroupList() {
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
   const navigate = useNavigate()
+  const { socket, unreadGroups, clearUnreadGroup } = useSocket()
 
   useEffect(() => {
     fetchGroups()
@@ -55,6 +57,11 @@ export default function GroupList() {
     e.preventDefault()
     if (!joinCode.trim()) return
     navigate(`/groups/join/${joinCode.trim().toUpperCase()}`)
+  }
+
+  const handleGroupClick = (groupId) => {
+    clearUnreadGroup(groupId)
+    navigate(`/groups/${groupId}`)
   }
 
   return (
@@ -110,24 +117,32 @@ export default function GroupList() {
           </div>
         ) : (
           <div className="space-y-2">
-            {groups.map((group) => (
-              <div
-                key={group._id}
-                onClick={() => navigate(`/groups/${group._id}`)}
-                className="panel p-4 flex items-center gap-4 hover:border-accent/20 transition-all cursor-pointer border border-transparent"
-              >
-                <div className="w-12 h-12 rounded-lg bg-accent-glow border border-accent/30 flex items-center justify-center font-mono font-bold text-accent text-lg shrink-0">
-                  {group.name.slice(0, 1).toUpperCase()}
+            {groups.map((group) => {
+              const hasUnread = !!unreadGroups?.[group._id]
+              return (
+                <div
+                  key={group._id}
+                  onClick={() => handleGroupClick(group._id)}
+                  className="panel p-4 flex items-center gap-4 hover:border-accent/20 transition-all cursor-pointer border border-transparent"
+                >
+                  <div className="w-12 h-12 rounded-lg bg-accent-glow border border-accent/30 flex items-center justify-center font-mono font-bold text-accent text-lg shrink-0">
+                    {group.name.slice(0, 1).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-text font-medium">{group.name}</p>
+                    <p className="text-text-dim text-xs font-mono truncate">
+                      {group.members.length} member{group.members.length !== 1 ? 's' : ''}
+                      {group.description && ` · ${group.description}`}
+                    </p>
+                  </div>
+
+                  {/* Unread green dot */}
+                  {hasUnread && (
+                    <span className="shrink-0 w-3.5 h-3.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)]" />
+                  )}
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-text font-medium">{group.name}</p>
-                  <p className="text-text-dim text-xs font-mono truncate">
-                    {group.members.length} member{group.members.length !== 1 ? 's' : ''}
-                    {group.description && ` · ${group.description}`}
-                  </p>
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
