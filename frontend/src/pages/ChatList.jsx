@@ -50,7 +50,7 @@ export default function ChatList() {
           <div className="space-y-2">
             {connections.map((conn) => {
               const isOnline = onlineUsers.includes(conn.userId?.toString())
-              const hasUnread = !!unreadChats[conn.userId?.toString()]
+              const unreadCount = unreadChats[conn.userId?.toString()] || 0
 
               return (
                 <Link
@@ -74,9 +74,11 @@ export default function ChatList() {
                     </p>
                   </div>
 
-                  {/* Unread green dot — chat এর ডান পাশে */}
-                  {hasUnread && (
-                    <span className="shrink-0 w-3.5 h-3.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)]" />
+                  {/* Unread count badge */}
+                  {unreadCount > 0 && (
+                    <span className="shrink-0 min-w-[22px] h-[22px] px-1.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)] flex items-center justify-center text-white text-xs font-bold font-mono">
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
                   )}
                 </Link>
               )

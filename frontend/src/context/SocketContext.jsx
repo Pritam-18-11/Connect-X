@@ -9,8 +9,8 @@ export function SocketProvider({ children }) {
 
   const [socket, setSocket] = useState(null)
   const [onlineUsers, setOnlineUsers] = useState([])
-  const [unreadChats, setUnreadChats] = useState({})
-  const [unreadGroups, setUnreadGroups] = useState({})
+  const [unreadChats, setUnreadChats] = useState({})   // { userId: count }
+  const [unreadGroups, setUnreadGroups] = useState({}) // { groupId: count }
 
   const socketRef = useRef(null)
 
@@ -64,18 +64,21 @@ export function SocketProvider({ children }) {
       setOnlineUsers((prev) => prev.filter((id) => id !== userId))
     })
 
-    // Private chat unread
+    // Private chat unread count
     s.on('receive_message', (msg) => {
       const senderId = typeof msg.senderId === 'object'
         ? msg.senderId?._id?.toString()
         : msg.senderId?.toString()
 
       if (senderId) {
-        setUnreadChats((prev) => ({ ...prev, [senderId]: true }))
+        setUnreadChats((prev) => ({
+          ...prev,
+          [senderId]: (prev[senderId] || 0) + 1
+        }))
       }
     })
 
-    // Group chat unread
+    // Group chat unread count
     s.on('receive_group_message', (msg) => {
       const groupId = typeof msg.groupId === 'object'
         ? msg.groupId?._id?.toString()
@@ -85,10 +88,12 @@ export function SocketProvider({ children }) {
         ? msg.senderId?._id?.toString()
         : msg.senderId?.toString()
 
-      // নিজের message এ dot দেখাবে না
       const currentUserId = String(user?.id || user?._id || '')
       if (groupId && senderId !== currentUserId) {
-        setUnreadGroups((prev) => ({ ...prev, [groupId]: true }))
+        setUnreadGroups((prev) => ({
+          ...prev,
+          [groupId]: (prev[groupId] || 0) + 1
+        }))
       }
     })
 

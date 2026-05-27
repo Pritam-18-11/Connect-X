@@ -118,7 +118,7 @@ export default function GroupList() {
         ) : (
           <div className="space-y-2">
             {groups.map((group) => {
-              const hasUnread = !!unreadGroups?.[group._id]
+              const unreadCount = unreadGroups?.[group._id] || 0
               return (
                 <div
                   key={group._id}
@@ -136,9 +136,11 @@ export default function GroupList() {
                     </p>
                   </div>
 
-                  {/* Unread green dot */}
-                  {hasUnread && (
-                    <span className="shrink-0 w-3.5 h-3.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)]" />
+                  {/* Unread count badge */}
+                  {unreadCount > 0 && (
+                    <span className="shrink-0 min-w-[22px] h-[22px] px-1.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)] flex items-center justify-center text-white text-xs font-bold font-mono">
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
                   )}
                 </div>
               )
