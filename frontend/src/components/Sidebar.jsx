@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, QrCode, KeyRound, UserCheck,
   MessageSquare, Settings, LogOut, Shield, Users,
-  Bell, Sun, Moon,
+  Bell, Sun, Moon, X,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
@@ -18,7 +18,7 @@ const navItems = [
   { to: '/settings',        icon: Settings,         label: 'Settings' },
 ]
 
-export default function Sidebar() {
+export default function Sidebar({ onClose }) {
   const { user, logout } = useAuth()
   const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
@@ -32,23 +32,36 @@ export default function Sidebar() {
     navigate('/login')
   }
 
+  const handleNavClick = () => {
+    if (onClose) onClose()
+  }
+
   return (
     <aside className="w-72 h-full flex flex-col bg-panel border-r border-border shrink-0">
       {/* ── Logo ───────────────────────────────── */}
       <div className="px-5 py-5 border-b border-border">
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <div className="w-9 h-9 rounded-xl bg-accent/10 border border-accent/25 flex items-center justify-center">
-              <Shield className="w-5 h-5 text-accent" />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <div className="w-9 h-9 rounded-xl bg-accent/10 border border-accent/25 flex items-center justify-center">
+                <Shield className="w-5 h-5 text-accent" />
+              </div>
+              <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-success rounded-full border-2 border-panel" />
             </div>
-            <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-success rounded-full border-2 border-panel" />
+            <div>
+              <h1 className="font-sans font-bold text-text tracking-tight text-sm leading-none">
+                PrivaChat
+              </h1>
+              <p className="text-text-dim text-xs mt-0.5 font-mono opacity-70">consent-first</p>
+            </div>
           </div>
-          <div>
-            <h1 className="font-sans font-bold text-text tracking-tight text-sm leading-none">
-              PrivaChat
-            </h1>
-            <p className="text-text-dim text-xs mt-0.5 font-mono opacity-70">consent-first</p>
-          </div>
+          {/* Close button — mobile only */}
+          <button
+            onClick={onClose}
+            className="md:hidden p-1.5 rounded-lg text-text-dim hover:text-text hover:bg-void transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
       </div>
 
@@ -76,6 +89,7 @@ export default function Sidebar() {
           <NavLink
             key={to}
             to={to}
+            onClick={handleNavClick}
             className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
           >
             <Icon className="w-[18px] h-[18px] shrink-0" />
@@ -86,10 +100,7 @@ export default function Sidebar() {
 
       {/* ── Bottom Actions ─────────────────────── */}
       <div className="px-3 py-3 border-t border-border space-y-0.5">
-        <button
-          onClick={toggleTheme}
-          className="nav-link w-full group"
-        >
+        <button onClick={toggleTheme} className="nav-link w-full group">
           {theme === 'dark' ? (
             <>
               <Sun className="w-[18px] h-[18px] shrink-0 text-warn" />
