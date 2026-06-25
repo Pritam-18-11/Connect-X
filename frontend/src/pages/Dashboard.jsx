@@ -23,17 +23,20 @@ export default function Dashboard() {
   const location = useLocation()
   const [connections, setConnections] = useState([])
   const [requests, setRequests] = useState([])
+  const [messagesToday, setMessagesToday] = useState(0)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [connRes, reqRes] = await Promise.all([
+        const [connRes, reqRes, statsRes] = await Promise.all([
           api.get('/connections/list'),
           api.get('/connections/requests'),
+          api.get('/chat/stats/today'),
         ])
         setConnections(connRes.data)
         setRequests(reqRes.data)
+        setMessagesToday(statsRes.data.count)
       } catch (err) {
         console.error('Dashboard fetch error:', err)
       } finally {
@@ -46,7 +49,7 @@ export default function Dashboard() {
   const stats = [
     { label: 'Active Connections', value: connections.length, icon: Shield, color: 'text-accent' },
     { label: 'Pending Requests', value: requests.length, icon: UserCheck, color: 'text-warn' },
-    { label: 'Messages Today', value: '0', icon: MessageSquare, color: 'text-success' },
+    { label: 'Messages Today', value: messagesToday, icon: MessageSquare, color: 'text-success' },
     { label: 'Timed Connections', value: '0', icon: Clock, color: 'text-accent' },
   ]
 

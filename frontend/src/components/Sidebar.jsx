@@ -50,7 +50,7 @@ export default function Sidebar({ onClose }) {
             </div>
             <div>
               <h1 className="font-sans font-bold text-text tracking-tight text-sm leading-none">
-                PrivaChat
+                Connect-X
               </h1>
               <p className="text-text-dim text-xs mt-0.5 font-mono opacity-70">consent-first</p>
             </div>

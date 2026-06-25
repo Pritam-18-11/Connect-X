@@ -7,7 +7,7 @@ import { useSocket } from '../context/SocketContext'
 import {
   Send, MoreVertical, X, Copy, Check,
   Users, UserPlus, LogOut, Shield, Crown,
-  MessageSquare, ChevronLeft, Clock, Search,
+  MessageSquare, ChevronLeft, Clock, Search, UserMinus,
 } from 'lucide-react'
 
 // ── Keyword Highlighter ───────────────────────────────────────
@@ -120,6 +120,7 @@ export default function GroupChat() {
   const [copiedLink, setCopiedLink] = useState(false)
   const [invitingUser, setInvitingUser] = useState(null)
   const [leavingGroup, setLeavingGroup] = useState(false)
+  const [removingMember, setRemovingMember] = useState(null)
 
   // Member detail states
   const [selectedMember, setSelectedMember] = useState(null)
@@ -170,7 +171,13 @@ export default function GroupChat() {
     socket.emit('join_group', { groupId })
 
     const handleMessage = (msg) => {
-      if (msg.groupId === groupId) setMessages((prev) => [...prev, msg])
+      const msgGroupId = typeof msg.groupId === 'object'
+        ? msg.groupId?._id?.toString()
+        : msg.groupId?.toString()
+
+      if (msgGroupId === groupId?.toString()) {
+        setMessages((prev) => [...prev, msg])
+      }
     }
 
     const handleChatApproved = ({ chatUserId }) => {
@@ -237,6 +244,34 @@ export default function GroupChat() {
     } catch (err) {
       console.error('Leave error:', err)
       setLeavingGroup(false)
+    }
+  }
+
+  // ── Remove Member Logic ───────────────────────────────────────
+  const handleRemoveMember = async (memberId) => {
+    setRemovingMember(memberId)
+    setRequestError('')
+    try {
+      const { data } = await api.post(`/groups/${groupId}/admin-action`, {
+        targetUserId: memberId,
+        actionType: 'remove-member',
+      })
+      if (data.direct) {
+        // Creator removed directly — update local state
+        setGroup((prev) => ({
+          ...prev,
+          members: prev.members.filter((m) => m._id?.toString() !== memberId),
+          admins: prev.admins.filter((a) => (a._id?.toString() || a.toString()) !== memberId),
+        }))
+        setSelectedMember(null)
+      } else {
+        // Admin (non-creator) — request submitted for creator approval
+        setRequestError('Remove request sent to group creator for approval.')
+      }
+    } catch (err) {
+      setRequestError(err.response?.data?.message || 'Failed to remove member.')
+    } finally {
+      setRemovingMember(null)
     }
   }
 
@@ -414,13 +449,11 @@ export default function GroupChat() {
     setShowSearch(false)
     setHighlightedMessageId(messageId)
 
-    // Wait for panel to close, then scroll to message
     setTimeout(() => {
       const el = messageRefs.current[messageId]
       if (el) {
         el.scrollIntoView({ behavior: 'smooth', block: 'center' })
       }
-      // Remove highlight after 3 seconds
       setTimeout(() => setHighlightedMessageId(null), 3000)
     }, 150)
   }
@@ -575,14 +608,11 @@ export default function GroupChat() {
       {/* ── Search Panel (right-side drawer) ── */}
       {showSearch && (
         <div className="fixed inset-0 z-40 flex pointer-events-none">
-          {/* Clickable backdrop */}
           <div
             className="flex-1 pointer-events-auto"
             onClick={() => setShowSearch(false)}
           />
-          {/* Panel */}
           <div className="w-80 bg-panel border-l border-border flex flex-col h-full shadow-panel pointer-events-auto">
-            {/* Panel header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
               <div className="flex items-center gap-2">
                 <Search className="w-4 h-4 text-accent" />
@@ -594,7 +624,6 @@ export default function GroupChat() {
               </button>
             </div>
 
-            {/* Tabs */}
             <div className="flex border-b border-border shrink-0">
               {[
                 { key: 'keyword', label: 'Keyword' },
@@ -615,7 +644,6 @@ export default function GroupChat() {
               ))}
             </div>
 
-            {/* Search inputs */}
             <div className="p-4 border-b border-border shrink-0">
               {searchTab === 'keyword' && (
                 <div className="flex gap-2">
@@ -694,7 +722,6 @@ export default function GroupChat() {
               )}
             </div>
 
-            {/* Results */}
             <div className="flex-1 overflow-y-auto p-3">
               {searchLoading && (
                 <div className="flex justify-center py-8">
@@ -777,6 +804,21 @@ export default function GroupChat() {
                 </div>
               )}
               {renderMemberActionButton()}
+
+              {/* Remove Member button — admins/creator only, not on self, not on creator */}
+              {currentUserIsAdmin &&
+                selectedMember._id?.toString() !== currentUserId &&
+                (group?.createdBy?._id?.toString() || group?.createdBy?.toString()) !== selectedMember._id?.toString() && (
+                  <button
+                    onClick={() => handleRemoveMember(selectedMember._id)}
+                    disabled={removingMember === selectedMember._id}
+                    className="w-full mt-3 py-2.5 rounded border border-danger/30 bg-danger/10 text-danger font-mono text-sm hover:bg-danger/20 transition-all disabled:opacity-60 flex items-center justify-center gap-2"
+                  >
+                    <UserMinus className="w-4 h-4" />
+                    {removingMember === selectedMember._id ? 'Removing...' : 'Remove from Group'}
+                  </button>
+                )}
+
               <p className="text-text-dim text-xs font-mono text-center mt-3 opacity-60">
                 Consent required for private messaging
               </p>

@@ -47,7 +47,7 @@ export default function Register() {
             <Shield className="w-8 h-8 text-accent" />
           </div>
           <h1 className="font-mono font-bold text-2xl text-text tracking-widest uppercase mb-2">
-            PrivaChat
+            Connect-X
           </h1>
           <p className="text-text-dim text-sm font-mono">consent-first private messaging</p>
         </div>

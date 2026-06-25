@@ -17,9 +17,6 @@ async function areConnected(userId1, userId2) {
   return !!conn
 }
 
-// Helper: check and update message limit
-// ownerUserId = receiver (the one who set the limit)
-// targetUserId = sender (the one being limited)
 async function checkMessageLimit(senderUserId, receiverUserId) {
   const today = new Date().toISOString().slice(0, 10)
 
@@ -30,7 +27,6 @@ async function checkMessageLimit(senderUserId, receiverUserId) {
 
   if (!limit) return { allowed: true }
 
-  // Auto reset if new day
   if (limit.lastResetDate !== today) {
     limit.currentCount = 0
     limit.lastResetDate = today
@@ -44,12 +40,30 @@ async function checkMessageLimit(senderUserId, receiverUserId) {
     }
   }
 
-  // Increment count
   limit.currentCount += 1
   await limit.save()
 
   return { allowed: true, remaining: limit.dailyLimit - limit.currentCount }
 }
+
+// ── GET /api/chat/stats/today ─────────────────────────────────
+// IMPORTANT: must come before /:userId route
+router.get('/stats/today', protect, async (req, res) => {
+  try {
+    const startOfDay = new Date()
+    startOfDay.setHours(0, 0, 0, 0)
+
+    const count = await Message.countDocuments({
+      senderId: req.user._id,
+      createdAt: { $gte: startOfDay },
+    })
+
+    res.json({ count })
+  } catch (error) {
+    console.error('Get today stats error:', error.message)
+    res.status(500).json({ message: 'Failed to fetch stats.' })
+  }
+})
 
 // ── GET /api/chat/:userId ─────────────────────────────────────
 router.get('/:userId', protect, async (req, res) => {
@@ -87,7 +101,6 @@ router.post('/send', protect, async (req, res) => {
       return res.status(403).json({ message: 'You are not connected with this user.' })
     }
 
-    // Check message limit
     const limitCheck = await checkMessageLimit(req.user._id, receiverId)
     if (!limitCheck.allowed) {
       return res.status(429).json({ message: limitCheck.message })
