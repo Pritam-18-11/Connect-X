@@ -10,10 +10,10 @@ import {
   Pencil, Trash2, MoreHorizontal,
 } from 'lucide-react'
 
-function MessageActionMenu({ isMe, onEdit, onDeleteMe, onDeleteEveryone, onClose }) {
+function MessageActionMenu({ isMe, onEdit, onDeleteMe, onDeleteEveryone, onClose, align }) {
   return (
     <div
-      className="absolute z-30 top-full mt-1 right-0 w-48 panel border border-border py-1"
+      className={`absolute z-30 top-full mt-1 ${align === 'left' ? 'left-0' : 'right-0'} w-48 panel border border-border py-1 shadow-modal`}
       onClick={(e) => e.stopPropagation()}
     >
       {isMe && (
@@ -73,11 +73,11 @@ function Message({
                   if (e.key === 'Escape') onCancelEdit()
                 }}
                 autoFocus
-                className="w-full bg-void/20 border border-current/30 rounded px-2 py-1 text-sm outline-none"
+                className="w-full bg-void border border-border rounded px-2 py-1 text-sm outline-none text-text"
               />
               <div className="flex gap-2 justify-end">
-                <button onClick={onCancelEdit} className="text-xs opacity-70 hover:opacity-100">Cancel</button>
-                <button onClick={onSaveEdit} className="text-xs font-semibold hover:underline">Save</button>
+                <button onClick={onCancelEdit} className={`text-xs opacity-80 hover:opacity-100 ${isMe ? 'text-void' : 'text-text-dim'}`}>Cancel</button>
+                <button onClick={onSaveEdit} className={`text-xs font-semibold hover:underline ${isMe ? 'text-void' : 'text-text'}`}>Save</button>
               </div>
             </div>
           ) : (
@@ -104,6 +104,7 @@ function Message({
         {showMenu && (
           <MessageActionMenu
             isMe={isMe}
+            align={isMe ? 'right' : 'left'}
             onEdit={() => onEdit(msg)}
             onDeleteMe={() => onDeleteMe(msg._id)}
             onDeleteEveryone={() => onDeleteEveryone(msg._id)}
@@ -266,7 +267,6 @@ export default function ChatWindow() {
     }
     const handleLimitReached = ({ message }) => setLimitError(message)
 
-    // ── Edit / Delete listeners ──────────────────────────────
     const handleEdited = ({ messageId, text }) => {
       setMessages((prev) =>
         prev.map((m) => (m._id === messageId ? { ...m, text } : m))

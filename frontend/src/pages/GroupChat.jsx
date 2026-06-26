@@ -33,10 +33,10 @@ function HighlightedText({ text, keyword }) {
 }
 
 // ── Message Action Menu ────────────────────────────────────────
-function MessageActionMenu({ isMe, canCreatorDelete, onEdit, onDeleteMe, onDeleteEveryone, onClose }) {
+function MessageActionMenu({ isMe, canCreatorDelete, onEdit, onDeleteMe, onDeleteEveryone, onClose, align }) {
   return (
     <div
-      className="absolute z-30 top-full mt-1 right-0 w-48 panel border border-border py-1"
+      className={`absolute z-30 top-full mt-1 ${align === 'left' ? 'left-0' : 'right-0'} w-48 panel border border-border py-1 shadow-modal`}
       onClick={(e) => e.stopPropagation()}
     >
       {isMe && (
@@ -99,20 +99,20 @@ function GroupMsg({
                   if (e.key === 'Escape') onCancelEdit()
                 }}
                 autoFocus
-                className="w-full bg-void/20 border border-current/30 rounded px-2 py-1 text-sm outline-none"
+                className="w-full bg-void border border-border rounded px-2 py-1 text-sm outline-none text-text"
               />
               <div className="flex gap-2 justify-end">
-                <button onClick={onCancelEdit} className="text-xs opacity-70 hover:opacity-100">Cancel</button>
-                <button onClick={onSaveEdit} className="text-xs font-semibold hover:underline">Save</button>
+                <button onClick={onCancelEdit} className={`text-xs opacity-80 hover:opacity-100 ${isMe ? 'text-void' : 'text-text-dim'}`}>Cancel</button>
+                <button onClick={onSaveEdit} className={`text-xs font-semibold hover:underline ${isMe ? 'text-void' : 'text-text'}`}>Save</button>
               </div>
             </div>
           ) : (
-            <p className={`text-xs mt-1 text-right ${isMe ? 'text-void/60' : 'text-text-dim'}`} style={{ display: 'contents' }}>
-              <span style={{ display: 'block' }}>{msg.text}</span>
-              <span className="block text-xs mt-1 text-right">
+            <>
+              <p>{msg.text}</p>
+              <p className={`text-xs mt-1 text-right ${isMe ? 'text-void/60' : 'text-text-dim'}`}>
                 {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </span>
-            </p>
+              </p>
+            </>
           )}
         </div>
 
@@ -129,6 +129,7 @@ function GroupMsg({
           <MessageActionMenu
             isMe={isMe}
             canCreatorDelete={canCreatorDelete}
+            align={isMe ? 'right' : 'left'}
             onEdit={() => onEdit(msg)}
             onDeleteMe={() => onDeleteMe(msg._id)}
             onDeleteEveryone={() => onDeleteEveryone(msg._id)}
@@ -286,21 +287,16 @@ export default function GroupChat() {
       }
     }
 
-    // ── Edit / Delete listeners ────────────────────────────────
     const handleEdited = ({ messageId, text }) => {
       setMessages((prev) =>
         prev.map((m) => (m._id === messageId ? { ...m, text } : m))
       )
     }
 
-    // Everyone except the original sender sees the message simply vanish
     const handleDeleted = ({ messageId }) => {
       setMessages((prev) => prev.filter((m) => m._id !== messageId))
     }
 
-    // The original sender ALSO receives this targeted event (in addition to
-    // handleDeleted from the room broadcast) — replace the message with a notice
-    // instead of removing it.
     const handleDeletedByCreator = ({ messageId, creatorName }) => {
       setMessages((prev) =>
         prev.map((m) =>
@@ -372,8 +368,6 @@ export default function GroupChat() {
   const deleteForEveryone = (messageId) => {
     if (!socket) return
     socket.emit('group_delete_message', { messageId, deleteFor: 'everyone' })
-    // Optimistically remove; if this client is the original sender being
-    // deleted by the creator, the targeted socket event will restore a notice.
     setMessages((prev) => prev.filter((m) => m._id !== messageId))
   }
 
