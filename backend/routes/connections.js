@@ -67,7 +67,11 @@ router.get('/requests', protect, async (req, res) => {
       receiverId: req.user._id,
       status: 'pending',
     }).populate('senderId', 'name email')
-    res.json(requests)
+
+    // Skip requests where the sender no longer exists (deleted account)
+    const validRequests = requests.filter((r) => r.senderId)
+
+    res.json(validRequests)
   } catch (error) {
     console.error('Get requests error:', error.message)
     res.status(500).json({ message: 'Failed to fetch requests.' })
@@ -130,19 +134,22 @@ router.get('/list', protect, async (req, res) => {
       .populate('user1', 'name email')
       .populate('user2', 'name email')
 
-    const connectedUsers = connections.map((conn) => {
-      const other =
-        conn.user1._id.toString() === req.user._id.toString()
-          ? conn.user2
-          : conn.user1
-      return {
-        connectionId: conn._id,
-        userId: other._id,
-        name: other.name,
-        email: other.email,
-        connectedAt: conn.createdAt,
-      }
-    })
+    const connectedUsers = connections
+      // Skip broken connections where the other user was deleted from DB
+      .filter((conn) => conn.user1 && conn.user2)
+      .map((conn) => {
+        const other =
+          conn.user1._id.toString() === req.user._id.toString()
+            ? conn.user2
+            : conn.user1
+        return {
+          connectionId: conn._id,
+          userId: other._id,
+          name: other.name,
+          email: other.email,
+          connectedAt: conn.createdAt,
+        }
+      })
 
     res.json(connectedUsers)
   } catch (error) {

@@ -7,28 +7,109 @@ import { useSocket } from '../context/SocketContext'
 import {
   Send, ShieldOff, Settings2, Clock, MoreVertical,
   X, Check, CheckCheck, AlertTriangle, AlertCircle, Ban,
+  Pencil, Trash2, MoreHorizontal,
 } from 'lucide-react'
 
-function Message({ msg, currentUserId }) {
+function MessageActionMenu({ isMe, onEdit, onDeleteMe, onDeleteEveryone, onClose }) {
+  return (
+    <div
+      className="absolute z-30 top-full mt-1 right-0 w-48 panel border border-border py-1"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {isMe && (
+        <button
+          onClick={() => { onEdit(); onClose() }}
+          className="w-full flex items-center gap-2.5 px-3 py-2 text-text-dim hover:text-text hover:bg-void text-xs font-mono transition-colors"
+        >
+          <Pencil className="w-3.5 h-3.5" /> Edit
+        </button>
+      )}
+      <button
+        onClick={() => { onDeleteMe(); onClose() }}
+        className="w-full flex items-center gap-2.5 px-3 py-2 text-text-dim hover:text-text hover:bg-void text-xs font-mono transition-colors"
+      >
+        <Trash2 className="w-3.5 h-3.5" /> Delete for me
+      </button>
+      {isMe && (
+        <button
+          onClick={() => { onDeleteEveryone(); onClose() }}
+          className="w-full flex items-center gap-2.5 px-3 py-2 text-danger hover:bg-danger/10 text-xs font-mono transition-colors"
+        >
+          <Trash2 className="w-3.5 h-3.5" /> Delete for everyone
+        </button>
+      )}
+    </div>
+  )
+}
+
+function Message({
+  msg, currentUserId, onEdit, onDeleteMe, onDeleteEveryone,
+  editingId, editText, setEditText, onSaveEdit, onCancelEdit,
+}) {
   const senderId =
     typeof msg.senderId === 'object'
       ? msg.senderId?._id?.toString()
       : msg.senderId?.toString()
 
   const isMe = senderId === currentUserId
+  const [showMenu, setShowMenu] = useState(false)
+  const isEditing = editingId === msg._id
 
   return (
-    <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-3`}>
-      <div className={`max-w-xs lg:max-w-sm px-4 py-2.5 rounded-lg text-sm font-mono leading-relaxed ${
-        isMe
-          ? 'bg-accent text-void rounded-br-sm'
-          : 'bg-panel border border-border text-text rounded-bl-sm'
-      }`}>
-        <p>{msg.text}</p>
-        <div className={`flex items-center justify-end gap-1 mt-1 text-xs ${isMe ? 'text-void/60' : 'text-text-dim'}`}>
-          <span>{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-          {isMe && (msg.seen ? <CheckCheck className="w-3 h-3" /> : <Check className="w-3 h-3" />)}
+    <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-3 group`}>
+      <div className="relative max-w-xs lg:max-w-sm">
+        <div className={`px-4 py-2.5 rounded-lg text-sm font-mono leading-relaxed ${
+          isMe
+            ? 'bg-accent text-void rounded-br-sm'
+            : 'bg-panel border border-border text-text rounded-bl-sm'
+        }`}>
+          {isEditing ? (
+            <div className="space-y-2">
+              <input
+                value={editText}
+                onChange={(e) => setEditText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') onSaveEdit()
+                  if (e.key === 'Escape') onCancelEdit()
+                }}
+                autoFocus
+                className="w-full bg-void/20 border border-current/30 rounded px-2 py-1 text-sm outline-none"
+              />
+              <div className="flex gap-2 justify-end">
+                <button onClick={onCancelEdit} className="text-xs opacity-70 hover:opacity-100">Cancel</button>
+                <button onClick={onSaveEdit} className="text-xs font-semibold hover:underline">Save</button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <p>{msg.text}</p>
+              <div className={`flex items-center justify-end gap-1 mt-1 text-xs ${isMe ? 'text-void/60' : 'text-text-dim'}`}>
+                <span>{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                {isMe && (msg.seen ? <CheckCheck className="w-3 h-3" /> : <Check className="w-3 h-3" />)}
+              </div>
+            </>
+          )}
         </div>
+
+        {/* Hover action trigger */}
+        {!isEditing && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setShowMenu((v) => !v) }}
+            className={`absolute top-0 ${isMe ? '-left-7' : '-right-7'} opacity-0 group-hover:opacity-100 p-1 rounded text-text-dim hover:text-text hover:bg-void transition-opacity`}
+          >
+            <MoreHorizontal className="w-4 h-4" />
+          </button>
+        )}
+
+        {showMenu && (
+          <MessageActionMenu
+            isMe={isMe}
+            onEdit={() => onEdit(msg)}
+            onDeleteMe={() => onDeleteMe(msg._id)}
+            onDeleteEveryone={() => onDeleteEveryone(msg._id)}
+            onClose={() => setShowMenu(false)}
+          />
+        )}
       </div>
     </div>
   )
@@ -99,6 +180,10 @@ export default function ChatWindow() {
   const [limitLoading, setLimitLoading] = useState(false)
   const [blockPhase, setBlockPhase] = useState('choose')
 
+  // Edit state
+  const [editingId, setEditingId] = useState(null)
+  const [editText, setEditText] = useState('')
+
   const bottomRef = useRef(null)
   const typingTimeoutRef = useRef(null)
 
@@ -155,7 +240,6 @@ export default function ChatWindow() {
       if (msg.senderId === otherUserId || msg.receiverId === otherUserId) {
         setMessages((prev) => [...prev, msg])
         socket.emit('mark_seen', { messageId: msg._id, senderId: msg.senderId })
-        // Chat window খোলা আছে, তাই receive হলেই clear করো
         clearUnread(otherUserId)
       }
     }
@@ -182,6 +266,16 @@ export default function ChatWindow() {
     }
     const handleLimitReached = ({ message }) => setLimitError(message)
 
+    // ── Edit / Delete listeners ──────────────────────────────
+    const handleEdited = ({ messageId, text }) => {
+      setMessages((prev) =>
+        prev.map((m) => (m._id === messageId ? { ...m, text } : m))
+      )
+    }
+    const handleDeleted = ({ messageId }) => {
+      setMessages((prev) => prev.filter((m) => m._id !== messageId))
+    }
+
     socket.on('receive_message', handleReceive)
     socket.on('message_sent', handleSent)
     socket.on('user_typing', handleTyping)
@@ -189,6 +283,8 @@ export default function ChatWindow() {
     socket.on('message_seen', handleSeen)
     socket.on('connection_revoked', handleRevoked)
     socket.on('message_limit_reached', handleLimitReached)
+    socket.on('message_edited', handleEdited)
+    socket.on('message_deleted', handleDeleted)
 
     return () => {
       socket.off('receive_message', handleReceive)
@@ -198,6 +294,8 @@ export default function ChatWindow() {
       socket.off('message_seen', handleSeen)
       socket.off('connection_revoked', handleRevoked)
       socket.off('message_limit_reached', handleLimitReached)
+      socket.off('message_edited', handleEdited)
+      socket.off('message_deleted', handleDeleted)
     }
   }, [socket, otherUserId, navigate])
 
@@ -222,6 +320,49 @@ export default function ChatWindow() {
     socket.emit('send_message', { receiverId: otherUserId, text: input.trim() })
     socket.emit('stop_typing', { receiverId: otherUserId })
     setInput('')
+  }
+
+  // ── Edit / Delete handlers ─────────────────────────────────
+  const startEdit = (msg) => {
+    setEditingId(msg._id)
+    setEditText(msg.text)
+  }
+
+  const cancelEdit = () => {
+    setEditingId(null)
+    setEditText('')
+  }
+
+  const saveEdit = async () => {
+    if (!editText.trim() || !editingId) return
+    try {
+      await api.put(`/chat/edit/${editingId}`, { text: editText.trim() })
+      setMessages((prev) =>
+        prev.map((m) => (m._id === editingId ? { ...m, text: editText.trim() } : m))
+      )
+    } catch (err) {
+      console.error('Edit error:', err)
+    } finally {
+      cancelEdit()
+    }
+  }
+
+  const deleteForMe = async (messageId) => {
+    try {
+      await api.delete(`/chat/${messageId}?for=me`)
+      setMessages((prev) => prev.filter((m) => m._id !== messageId))
+    } catch (err) {
+      console.error('Delete for me error:', err)
+    }
+  }
+
+  const deleteForEveryone = async (messageId) => {
+    try {
+      await api.delete(`/chat/${messageId}?for=everyone`)
+      setMessages((prev) => prev.filter((m) => m._id !== messageId))
+    } catch (err) {
+      console.error('Delete for everyone error:', err)
+    }
   }
 
   const handleRevoke = async () => {
@@ -415,7 +556,19 @@ export default function ChatWindow() {
             </div>
           )}
           {messages.map((msg) => (
-            <Message key={msg._id} msg={msg} currentUserId={currentUserId} />
+            <Message
+              key={msg._id}
+              msg={msg}
+              currentUserId={currentUserId}
+              onEdit={startEdit}
+              onDeleteMe={deleteForMe}
+              onDeleteEveryone={deleteForEveryone}
+              editingId={editingId}
+              editText={editText}
+              setEditText={setEditText}
+              onSaveEdit={saveEdit}
+              onCancelEdit={cancelEdit}
+            />
           ))}
           {isTyping && <TypingIndicator name={otherUser?.name} />}
           <div ref={bottomRef} />

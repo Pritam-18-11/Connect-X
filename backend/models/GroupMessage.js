@@ -17,6 +17,27 @@ const groupMessageSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    isEdited: {
+      type: Boolean,
+      default: false,
+    },
+    isDeletedForEveryone: {
+      type: Boolean,
+      default: false,
+    },
+    // Set when the Creator deletes someone else's message.
+    // Only the original sender should see the "deleted by X" notice.
+    deletedByCreator: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    deletedFor: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
+    ],
   },
   { timestamps: true }
 )

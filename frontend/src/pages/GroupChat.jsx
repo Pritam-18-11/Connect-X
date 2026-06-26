@@ -8,6 +8,7 @@ import {
   Send, MoreVertical, X, Copy, Check,
   Users, UserPlus, LogOut, Shield, Crown,
   MessageSquare, ChevronLeft, Clock, Search, UserMinus,
+  Pencil, Trash2, MoreHorizontal,
 } from 'lucide-react'
 
 // ── Keyword Highlighter ───────────────────────────────────────
@@ -31,26 +32,122 @@ function HighlightedText({ text, keyword }) {
   )
 }
 
+// ── Message Action Menu ────────────────────────────────────────
+function MessageActionMenu({ isMe, canCreatorDelete, onEdit, onDeleteMe, onDeleteEveryone, onClose }) {
+  return (
+    <div
+      className="absolute z-30 top-full mt-1 right-0 w-48 panel border border-border py-1"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {isMe && (
+        <button
+          onClick={() => { onEdit(); onClose() }}
+          className="w-full flex items-center gap-2.5 px-3 py-2 text-text-dim hover:text-text hover:bg-void text-xs font-mono transition-colors"
+        >
+          <Pencil className="w-3.5 h-3.5" /> Edit
+        </button>
+      )}
+      <button
+        onClick={() => { onDeleteMe(); onClose() }}
+        className="w-full flex items-center gap-2.5 px-3 py-2 text-text-dim hover:text-text hover:bg-void text-xs font-mono transition-colors"
+      >
+        <Trash2 className="w-3.5 h-3.5" /> Delete for me
+      </button>
+      {(isMe || canCreatorDelete) && (
+        <button
+          onClick={() => { onDeleteEveryone(); onClose() }}
+          className="w-full flex items-center gap-2.5 px-3 py-2 text-danger hover:bg-danger/10 text-xs font-mono transition-colors"
+        >
+          <Trash2 className="w-3.5 h-3.5" /> Delete for everyone
+        </button>
+      )}
+    </div>
+  )
+}
+
 // ── Group Message Component ───────────────────────────────────
-function GroupMsg({ msg, currentUserId }) {
+function GroupMsg({
+  msg, currentUserId, isCurrentUserCreator,
+  onEdit, onDeleteMe, onDeleteEveryone,
+  editingId, editText, setEditText, onSaveEdit, onCancelEdit,
+}) {
   const senderId = msg.senderId?._id?.toString() || msg.senderId?.toString()
   const isMe = senderId === currentUserId
   const senderName = msg.senderId?.name || 'Unknown'
+  const [showMenu, setShowMenu] = useState(false)
+  const isEditing = editingId === msg._id
+
+  // Creator can delete-for-everyone on others' messages too
+  const canCreatorDelete = isCurrentUserCreator && !isMe
 
   return (
-    <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-3`}>
-      <div className={`max-w-xs lg:max-w-sm ${!isMe ? 'space-y-1' : ''}`}>
+    <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-3 group`}>
+      <div className={`relative max-w-xs lg:max-w-sm ${!isMe ? 'space-y-1' : ''}`}>
         {!isMe && <p className="text-accent text-xs font-mono px-1">{senderName}</p>}
         <div className={`px-4 py-2.5 rounded-lg text-sm font-mono leading-relaxed ${
           isMe
             ? 'bg-accent text-void rounded-br-sm'
             : 'bg-panel border border-border text-text rounded-bl-sm'
         }`}>
-          <p>{msg.text}</p>
-          <p className={`text-xs mt-1 text-right ${isMe ? 'text-void/60' : 'text-text-dim'}`}>
-            {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </p>
+          {isEditing ? (
+            <div className="space-y-2">
+              <input
+                value={editText}
+                onChange={(e) => setEditText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') onSaveEdit()
+                  if (e.key === 'Escape') onCancelEdit()
+                }}
+                autoFocus
+                className="w-full bg-void/20 border border-current/30 rounded px-2 py-1 text-sm outline-none"
+              />
+              <div className="flex gap-2 justify-end">
+                <button onClick={onCancelEdit} className="text-xs opacity-70 hover:opacity-100">Cancel</button>
+                <button onClick={onSaveEdit} className="text-xs font-semibold hover:underline">Save</button>
+              </div>
+            </div>
+          ) : (
+            <p className={`text-xs mt-1 text-right ${isMe ? 'text-void/60' : 'text-text-dim'}`} style={{ display: 'contents' }}>
+              <span style={{ display: 'block' }}>{msg.text}</span>
+              <span className="block text-xs mt-1 text-right">
+                {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            </p>
+          )}
         </div>
+
+        {!isEditing && (canCreatorDelete || isMe) && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setShowMenu((v) => !v) }}
+            className={`absolute top-0 ${isMe ? '-left-7' : '-right-7'} opacity-0 group-hover:opacity-100 p-1 rounded text-text-dim hover:text-text hover:bg-void transition-opacity`}
+          >
+            <MoreHorizontal className="w-4 h-4" />
+          </button>
+        )}
+
+        {showMenu && (
+          <MessageActionMenu
+            isMe={isMe}
+            canCreatorDelete={canCreatorDelete}
+            onEdit={() => onEdit(msg)}
+            onDeleteMe={() => onDeleteMe(msg._id)}
+            onDeleteEveryone={() => onDeleteEveryone(msg._id)}
+            onClose={() => setShowMenu(false)}
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── "Deleted by creator" notice — shown ONLY to the original sender ──
+function DeletedByCreatorNotice({ msg, currentUserId }) {
+  const senderId = msg.senderId?._id?.toString() || msg.senderId?.toString()
+  const isMe = senderId === currentUserId
+  return (
+    <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-3`}>
+      <div className="max-w-xs lg:max-w-sm px-4 py-2.5 rounded-lg text-xs font-mono italic text-text-dim border border-dashed border-border bg-panel/40">
+        This message is deleted by {msg._deletedByCreatorName}
       </div>
     </div>
   )
@@ -129,9 +226,13 @@ export default function GroupChat() {
   const [processingRequest, setProcessingRequest] = useState(false)
   const [requestError, setRequestError] = useState('')
 
+  // Edit state
+  const [editingId, setEditingId] = useState(null)
+  const [editText, setEditText] = useState('')
+
   // Search states
   const [showSearch, setShowSearch] = useState(false)
-  const [searchTab, setSearchTab] = useState('keyword') // 'keyword' | 'username' | 'date'
+  const [searchTab, setSearchTab] = useState('keyword')
   const [keyword, setKeyword] = useState('')
   const [selectedMemberId, setSelectedMemberId] = useState('')
   const [dateFrom, setDateFrom] = useState('')
@@ -141,7 +242,6 @@ export default function GroupChat() {
   const [searchDone, setSearchDone] = useState(false)
   const [highlightedMessageId, setHighlightedMessageId] = useState(null)
 
-  // Highlighted state for a message
   const bottomRef = useRef(null)
   const messageRefs = useRef({})
 
@@ -186,12 +286,49 @@ export default function GroupChat() {
       }
     }
 
+    // ── Edit / Delete listeners ────────────────────────────────
+    const handleEdited = ({ messageId, text }) => {
+      setMessages((prev) =>
+        prev.map((m) => (m._id === messageId ? { ...m, text } : m))
+      )
+    }
+
+    // Everyone except the original sender sees the message simply vanish
+    const handleDeleted = ({ messageId }) => {
+      setMessages((prev) => prev.filter((m) => m._id !== messageId))
+    }
+
+    // The original sender ALSO receives this targeted event (in addition to
+    // handleDeleted from the room broadcast) — replace the message with a notice
+    // instead of removing it.
+    const handleDeletedByCreator = ({ messageId, creatorName }) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m._id === messageId
+            ? { ...m, _deletedByCreator: true, _deletedByCreatorName: creatorName }
+            : m
+        )
+      )
+    }
+
+    const handleDeletedForMe = ({ messageId }) => {
+      setMessages((prev) => prev.filter((m) => m._id !== messageId))
+    }
+
     socket.on('receive_group_message', handleMessage)
     socket.on('private_chat_approved', handleChatApproved)
+    socket.on('group_message_edited', handleEdited)
+    socket.on('group_message_deleted', handleDeleted)
+    socket.on('group_message_deleted_by_creator', handleDeletedByCreator)
+    socket.on('group_message_deleted_for_me', handleDeletedForMe)
 
     return () => {
       socket.off('receive_group_message', handleMessage)
       socket.off('private_chat_approved', handleChatApproved)
+      socket.off('group_message_edited', handleEdited)
+      socket.off('group_message_deleted', handleDeleted)
+      socket.off('group_message_deleted_by_creator', handleDeletedByCreator)
+      socket.off('group_message_deleted_for_me', handleDeletedForMe)
     }
   }, [socket, groupId, selectedMember])
 
@@ -204,6 +341,40 @@ export default function GroupChat() {
     if (!input.trim() || !socket) return
     socket.emit('group_send_message', { groupId, text: input.trim() })
     setInput('')
+  }
+
+  // ── Edit / Delete handlers ─────────────────────────────────
+  const startEdit = (msg) => {
+    setEditingId(msg._id)
+    setEditText(msg.text)
+  }
+
+  const cancelEdit = () => {
+    setEditingId(null)
+    setEditText('')
+  }
+
+  const saveEdit = () => {
+    if (!editText.trim() || !editingId || !socket) return
+    socket.emit('group_edit_message', { messageId: editingId, text: editText.trim() })
+    setMessages((prev) =>
+      prev.map((m) => (m._id === editingId ? { ...m, text: editText.trim() } : m))
+    )
+    cancelEdit()
+  }
+
+  const deleteForMe = (messageId) => {
+    if (!socket) return
+    socket.emit('group_delete_message', { messageId, deleteFor: 'me' })
+    setMessages((prev) => prev.filter((m) => m._id !== messageId))
+  }
+
+  const deleteForEveryone = (messageId) => {
+    if (!socket) return
+    socket.emit('group_delete_message', { messageId, deleteFor: 'everyone' })
+    // Optimistically remove; if this client is the original sender being
+    // deleted by the creator, the targeted socket event will restore a notice.
+    setMessages((prev) => prev.filter((m) => m._id !== messageId))
   }
 
   const copyLink = () => {
@@ -257,7 +428,6 @@ export default function GroupChat() {
         actionType: 'remove-member',
       })
       if (data.direct) {
-        // Creator removed directly — update local state
         setGroup((prev) => ({
           ...prev,
           members: prev.members.filter((m) => m._id?.toString() !== memberId),
@@ -265,7 +435,6 @@ export default function GroupChat() {
         }))
         setSelectedMember(null)
       } else {
-        // Admin (non-creator) — request submitted for creator approval
         setRequestError('Remove request sent to group creator for approval.')
       }
     } catch (err) {
@@ -572,19 +741,43 @@ export default function GroupChat() {
               No messages yet. Start the conversation!
             </div>
           )}
-          {messages.map((msg) => (
-            <div
-              key={msg._id}
-              ref={(el) => { if (el) messageRefs.current[msg._id] = el }}
-              className={`rounded-lg transition-all duration-500 ${
-                highlightedMessageId === msg._id
-                  ? 'outline outline-2 outline-accent/60 bg-accent/5 shadow-glow-sm'
-                  : ''
-              }`}
-            >
-              <GroupMsg msg={msg} currentUserId={currentUserId} />
-            </div>
-          ))}
+          {messages.map((msg) => {
+            if (msg._deletedByCreator) {
+              return (
+                <div key={msg._id} ref={(el) => { if (el) messageRefs.current[msg._id] = el }}>
+                  <DeletedByCreatorNotice
+                    msg={{ ...msg, _deletedByCreatorName: msg._deletedByCreatorName }}
+                    currentUserId={currentUserId}
+                  />
+                </div>
+              )
+            }
+            return (
+              <div
+                key={msg._id}
+                ref={(el) => { if (el) messageRefs.current[msg._id] = el }}
+                className={`rounded-lg transition-all duration-500 ${
+                  highlightedMessageId === msg._id
+                    ? 'outline outline-2 outline-accent/60 bg-accent/5 shadow-glow-sm'
+                    : ''
+                }`}
+              >
+                <GroupMsg
+                  msg={msg}
+                  currentUserId={currentUserId}
+                  isCurrentUserCreator={currentUserIsCreator}
+                  onEdit={startEdit}
+                  onDeleteMe={deleteForMe}
+                  onDeleteEveryone={deleteForEveryone}
+                  editingId={editingId}
+                  editText={editText}
+                  setEditText={setEditText}
+                  onSaveEdit={saveEdit}
+                  onCancelEdit={cancelEdit}
+                />
+              </div>
+            )
+          })}
           <div ref={bottomRef} />
         </div>
 

@@ -9,6 +9,10 @@ const GroupMessage = require('../models/GroupMessage')
 
 const onlineUsers = new Map()
 
+function isCreator(group, userId) {
+  return group.createdBy.toString() === userId.toString()
+}
+
 async function checkAndUpdateLimit(senderUserId, receiverUserId) {
   const today = new Date().toISOString().slice(0, 10)
   const limit = await MessageLimit.findOne({
@@ -106,6 +110,7 @@ function initSocket(server) {
           receiverId,
           text: message.text,
           seen: false,
+          isEdited: false,
           createdAt: message.createdAt,
         }
 
@@ -169,12 +174,100 @@ function initSocket(server) {
           groupId,
           senderId: { _id: userId, name: socket.user.name },
           text: message.text,
+          isEdited: false,
           createdAt: message.createdAt,
         }
 
         io.to(`group_${groupId}`).emit('receive_group_message', msgData)
       } catch (err) {
         console.error('Group send message error:', err.message)
+      }
+    })
+
+    // ── Group: Edit message ───────────────────────────────────
+    // Only the original sender can edit. No "(edited)" trace shown to anyone.
+    socket.on('group_edit_message', async ({ messageId, text }) => {
+      try {
+        if (!text || !text.trim()) return
+
+        const message = await GroupMessage.findById(messageId)
+        if (!message) return
+        if (message.senderId.toString() !== userId) return
+        if (message.isDeletedForEveryone) return
+
+        message.text = text.trim()
+        message.isEdited = true
+        await message.save()
+
+        io.to(`group_${message.groupId}`).emit('group_message_edited', {
+          messageId: message._id,
+          text: message.text,
+        })
+      } catch (err) {
+        console.error('Group edit message error:', err.message)
+      }
+    })
+
+    // ── Group: Delete message ─────────────────────────────────
+    // deleteFor: 'me' | 'everyone'
+    // - Sender deleting own message: removed for everyone, no trace anywhere.
+    // - Creator deleting someone else's message:
+    //     -> The original sender's room (their personal userId room) is
+    //        EXCLUDED from the generic "deleted" broadcast, and instead gets
+    //        ONLY the targeted "deleted by creator" event. This removes any
+    //        race condition — the sender's client can never receive both
+    //        events and never has to reconcile ordering.
+    //     -> Everyone else in the group just sees the message vanish.
+    socket.on('group_delete_message', async ({ messageId, deleteFor }) => {
+      try {
+        const message = await GroupMessage.findById(messageId)
+        if (!message) return
+
+        const group = await Group.findById(message.groupId)
+        if (!group) return
+
+        const isSender = message.senderId.toString() === userId
+        const isGroupCreator = isCreator(group, userId)
+        const groupRoom = `group_${message.groupId}`
+
+        if (deleteFor === 'everyone') {
+          if (!isSender && !isGroupCreator) return // not authorized
+
+          if (isSender) {
+            // Sender deleting their own message — fully gone for everyone, no trace
+            await GroupMessage.findByIdAndDelete(message._id)
+            io.to(groupRoom).emit('group_message_deleted', { messageId: message._id })
+            return
+          }
+
+          // Creator deleting someone else's message.
+          // Broadcast the generic "vanish" event to the room EXCEPT the
+          // original sender's personal room, so the sender's client only
+          // ever receives the targeted notice event below — no ordering
+          // ambiguity, no race condition.
+          const senderUserId = message.senderId.toString()
+
+          io.to(groupRoom).except(senderUserId).emit('group_message_deleted', {
+            messageId: message._id,
+          })
+
+          io.to(senderUserId).emit('group_message_deleted_by_creator', {
+            messageId: message._id,
+            creatorName: socket.user.name,
+          })
+
+          await GroupMessage.findByIdAndDelete(message._id)
+          return
+        }
+
+        // Delete for me only
+        if (!message.deletedFor.some((id) => id.toString() === userId)) {
+          message.deletedFor.push(userId)
+          await message.save()
+        }
+        socket.emit('group_message_deleted_for_me', { messageId: message._id })
+      } catch (err) {
+        console.error('Group delete message error:', err.message)
       }
     })
 

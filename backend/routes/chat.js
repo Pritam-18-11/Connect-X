@@ -4,6 +4,7 @@ const Message = require('../models/Message')
 const Connection = require('../models/Connection')
 const MessageLimit = require('../models/MessageLimit')
 const { protect } = require('../middleware/auth')
+const { getIO } = require('../socket/socketManager')
 
 async function areConnected(userId1, userId2) {
   const conn = await Connection.findOne({
@@ -78,6 +79,8 @@ router.get('/:userId', protect, async (req, res) => {
         { senderId: req.user._id, receiverId: req.params.userId },
         { senderId: req.params.userId, receiverId: req.user._id },
       ],
+      // Hide messages this user deleted "for me"
+      deletedFor: { $ne: req.user._id },
     }).sort({ createdAt: 1 })
 
     res.json(messages)
@@ -132,6 +135,91 @@ router.put('/seen/:messageId', protect, async (req, res) => {
   } catch (error) {
     console.error('Mark seen error:', error.message)
     res.status(500).json({ message: 'Failed to mark as seen.' })
+  }
+})
+
+// ── PUT /api/chat/edit/:messageId ─────────────────────────────
+// Only the original sender can edit their own message. No "(edited)" trace is shown.
+router.put('/edit/:messageId', protect, async (req, res) => {
+  try {
+    const { text } = req.body
+    if (!text || !text.trim()) {
+      return res.status(400).json({ message: 'Message cannot be empty.' })
+    }
+
+    const message = await Message.findById(req.params.messageId)
+    if (!message) return res.status(404).json({ message: 'Message not found.' })
+
+    if (message.senderId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'You can only edit your own messages.' })
+    }
+
+    if (message.isDeletedForEveryone) {
+      return res.status(400).json({ message: 'Cannot edit a deleted message.' })
+    }
+
+    message.text = text.trim()
+    message.isEdited = true
+    await message.save()
+
+    const otherUserId =
+      message.senderId.toString() === req.user._id.toString()
+        ? message.receiverId.toString()
+        : message.senderId.toString()
+
+    const io = getIO()
+    if (io) {
+      io.to(otherUserId).emit('message_edited', {
+        messageId: message._id,
+        text: message.text,
+      })
+    }
+
+    res.json({ success: true, message })
+  } catch (error) {
+    console.error('Edit message error:', error.message)
+    res.status(500).json({ message: 'Failed to edit message.' })
+  }
+})
+
+// ── DELETE /api/chat/:messageId?for=me|everyone ───────────────
+router.delete('/:messageId', protect, async (req, res) => {
+  try {
+    const { for: deleteFor } = req.query // 'me' | 'everyone'
+    const message = await Message.findById(req.params.messageId)
+    if (!message) return res.status(404).json({ message: 'Message not found.' })
+
+    const userId = req.user._id.toString()
+    const isSender = message.senderId.toString() === userId
+
+    const otherUserId = isSender
+      ? message.receiverId.toString()
+      : message.senderId.toString()
+
+    if (deleteFor === 'everyone') {
+      if (!isSender) {
+        return res.status(403).json({ message: 'You can only delete your own messages for everyone.' })
+      }
+      await Message.findByIdAndDelete(message._id)
+
+      const io = getIO()
+      if (io) {
+        io.to(otherUserId).emit('message_deleted', { messageId: message._id })
+      }
+
+      return res.json({ success: true })
+    }
+
+    // Delete for me only — add to deletedFor array
+    if (!message.deletedFor.some((id) => id.toString() === userId)) {
+      message.deletedFor.push(req.user._id)
+      await message.save()
+    }
+
+    res.json({ success: true })
+  } catch (error) {
+    console.error('Delete message error:', error.message)
+    res.status(500).json({ message: 'Failed to delete message.' })
   }
 })
 
