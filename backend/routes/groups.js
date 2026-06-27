@@ -6,6 +6,7 @@ const GroupJoinRequest = require('../models/GroupJoinRequest')
 const GroupMessage = require('../models/GroupMessage')
 const AdminActionRequest = require('../models/AdminActionRequest')
 const Connection = require('../models/Connection')
+const User = require('../models/User')
 const { protect } = require('../middleware/auth')
 
 function generateCode() {
@@ -36,6 +37,30 @@ async function areConnected(userId1, userId2) {
   return !!conn
 }
 
+// Removes member/admin IDs that no longer correspond to an existing User.
+// Returns the cleaned group (re-fetched if a cleanup write happened).
+async function pruneDeletedMembers(group) {
+  const allIds = [...new Set([...group.members.map((m) => m.toString())])]
+  if (allIds.length === 0) return group
+
+  const existingUsers = await User.find({ _id: { $in: allIds } }).select('_id')
+  const existingIds = new Set(existingUsers.map((u) => u._id.toString()))
+
+  const validMembers = group.members.filter((m) => existingIds.has(m.toString()))
+  const validAdmins = group.admins.filter((a) => existingIds.has(a.toString()))
+
+  const membersChanged = validMembers.length !== group.members.length
+  const adminsChanged = validAdmins.length !== group.admins.length
+
+  if (membersChanged || adminsChanged) {
+    group.members = validMembers
+    group.admins = validAdmins
+    await group.save()
+  }
+
+  return group
+}
+
 router.post('/', protect, async (req, res) => {
   try {
     const { name, description } = req.body
@@ -63,9 +88,13 @@ router.get('/', protect, async (req, res) => {
       .populate('createdBy', 'name')
       .sort({ updatedAt: -1 })
 
-    const myGroups = groups.filter((g) =>
-      g.members.some((m) => m.toString() === req.user._id.toString())
-    )
+    const myGroups = []
+    for (const group of groups) {
+      const cleaned = await pruneDeletedMembers(group)
+      if (cleaned.members.some((m) => m.toString() === req.user._id.toString())) {
+        myGroups.push(cleaned)
+      }
+    }
 
     res.json(myGroups)
   } catch (err) {
@@ -120,6 +149,8 @@ router.get('/join/:code', protect, async (req, res) => {
     const group = await Group.findOne({ inviteCode: req.params.code })
       .populate('createdBy', 'name')
     if (!group) return res.status(404).json({ message: 'Invalid invite code.' })
+
+    await pruneDeletedMembers(group)
 
     const alreadyMember = group.members.some(
       (m) => m.toString() === req.user._id.toString()
@@ -297,6 +328,8 @@ router.get('/:id([0-9a-fA-F]{24})', protect, async (req, res) => {
   try {
     const rawGroup = await Group.findById(req.params.id)
     if (!rawGroup) return res.status(404).json({ message: 'Group not found.' })
+
+    await pruneDeletedMembers(rawGroup)
 
     const memberCheck = rawGroup.members.some(
       (m) => m.toString() === req.user._id.toString()
@@ -500,7 +533,6 @@ router.get('/:groupId/search/keyword', protect, async (req, res) => {
       return res.status(400).json({ message: 'Keyword is required.' })
     }
 
-    // Escape special regex characters for safety
     const escaped = q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
     const messages = await GroupMessage.find({
@@ -533,7 +565,6 @@ router.get('/:groupId/search/username', protect, async (req, res) => {
       return res.status(400).json({ message: 'userId is required.' })
     }
 
-    // Verify the searched user is actually a member of this group
     if (!isMember(rawGroup, userId)) {
       return res.status(400).json({ message: 'User is not a member of this group.' })
     }

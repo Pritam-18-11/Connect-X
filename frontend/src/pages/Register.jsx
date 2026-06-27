@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Shield, Eye, EyeOff, Lock, Mail, User, AlertCircle, CheckCircle } from 'lucide-react'
+import { Shield, Eye, EyeOff, Lock, Mail, User, AlertCircle, CheckCircle, Sun, Moon } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
+import { useTheme } from '../context/ThemeContext'
 
 export default function Register() {
   const [showPassword, setShowPassword] = useState(false)
@@ -10,6 +11,7 @@ export default function Register() {
   const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
   const { register } = useAuth()
+  const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
 
   const handleChange = (e) =>
@@ -40,6 +42,15 @@ export default function Register() {
     <div className="min-h-screen bg-void grid-bg flex items-center justify-center px-4 relative overflow-hidden">
       <div className="absolute top-1/3 right-1/4 w-72 h-72 rounded-full bg-accent/5 blur-3xl pointer-events-none" />
       <div className="absolute bottom-1/3 left-1/4 w-72 h-72 rounded-full bg-accent/5 blur-3xl pointer-events-none" />
+
+      {/* Theme toggle */}
+      <button
+        onClick={toggleTheme}
+        className="absolute top-5 right-5 z-10 p-2.5 rounded-lg border border-border bg-panel text-text-dim hover:text-text hover:border-accent/40 transition-colors"
+        title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+      >
+        {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+      </button>
 
       <div className="w-full max-w-md">
         <div className="text-center mb-10">

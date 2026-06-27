@@ -11,6 +11,45 @@ import {
   Pencil, Trash2, MoreHorizontal,
 } from 'lucide-react'
 
+// ── Date helpers ────────────────────────────────────────────────
+function getDateLabel(dateStr) {
+  const date = new Date(dateStr)
+  const now = new Date()
+
+  const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  const dayDiff = (startOfDay(now) - startOfDay(date)) / (1000 * 60 * 60 * 24)
+
+  if (dayDiff === 0) return 'Today'
+  if (dayDiff === 1) return 'Yesterday'
+
+  const sameYear = date.getFullYear() === now.getFullYear()
+  return date.toLocaleDateString('en-US', {
+    day: 'numeric',
+    month: 'short',
+    year: sameYear ? undefined : 'numeric',
+  })
+}
+
+function isSameDay(d1, d2) {
+  const a = new Date(d1)
+  const b = new Date(d2)
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  )
+}
+
+function DateSeparator({ label }) {
+  return (
+    <div className="flex items-center justify-center my-4">
+      <span className="px-3 py-1 rounded-full bg-panel border border-border text-text-dim text-xs font-mono">
+        {label}
+      </span>
+    </div>
+  )
+}
+
 // ── Keyword Highlighter ───────────────────────────────────────
 function HighlightedText({ text, keyword }) {
   if (!keyword || !keyword.trim()) return <span>{text}</span>
@@ -32,11 +71,34 @@ function HighlightedText({ text, keyword }) {
   )
 }
 
-// ── Message Action Menu ────────────────────────────────────────
-function MessageActionMenu({ isMe, canCreatorDelete, onEdit, onDeleteMe, onDeleteEveryone, onClose, align }) {
+// ── Message Action Menu — fixed-position, viewport-clamped ─────
+function MessageActionMenu({ isMe, canCreatorDelete, onEdit, onDeleteMe, onDeleteEveryone, onClose, anchorRect }) {
+  const menuRef = useRef(null)
+  const [style, setStyle] = useState({ top: 0, left: 0, visibility: 'hidden' })
+
+  useEffect(() => {
+    if (!anchorRect || !menuRef.current) return
+    const menuWidth = menuRef.current.offsetWidth || 192
+    const menuHeight = menuRef.current.offsetHeight || 120
+    const gap = 6
+
+    let left = isMe
+      ? anchorRect.left - menuWidth - gap
+      : anchorRect.right + gap
+
+    left = Math.max(8, Math.min(left, window.innerWidth - menuWidth - 8))
+
+    let top = anchorRect.top
+    top = Math.max(8, Math.min(top, window.innerHeight - menuHeight - 8))
+
+    setStyle({ top, left, visibility: 'visible' })
+  }, [anchorRect, isMe])
+
   return (
     <div
-      className={`absolute z-30 top-full mt-1 ${align === 'left' ? 'left-0' : 'right-0'} w-48 panel border border-border py-1 shadow-modal`}
+      ref={menuRef}
+      style={{ position: 'fixed', top: style.top, left: style.left, visibility: style.visibility }}
+      className="z-50 w-48 panel border border-border py-1 shadow-modal"
       onClick={(e) => e.stopPropagation()}
     >
       {isMe && (
@@ -75,10 +137,19 @@ function GroupMsg({
   const isMe = senderId === currentUserId
   const senderName = msg.senderId?.name || 'Unknown'
   const [showMenu, setShowMenu] = useState(false)
+  const [anchorRect, setAnchorRect] = useState(null)
+  const triggerRef = useRef(null)
   const isEditing = editingId === msg._id
 
   // Creator can delete-for-everyone on others' messages too
   const canCreatorDelete = isCurrentUserCreator && !isMe
+
+  const openMenu = (e) => {
+    e.stopPropagation()
+    const rect = triggerRef.current?.getBoundingClientRect()
+    setAnchorRect(rect)
+    setShowMenu((v) => !v)
+  }
 
   return (
     <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-3 group`}>
@@ -118,7 +189,8 @@ function GroupMsg({
 
         {!isEditing && (canCreatorDelete || isMe) && (
           <button
-            onClick={(e) => { e.stopPropagation(); setShowMenu((v) => !v) }}
+            ref={triggerRef}
+            onClick={openMenu}
             className={`absolute top-0 ${isMe ? '-left-7' : '-right-7'} opacity-0 group-hover:opacity-100 p-1 rounded text-text-dim hover:text-text hover:bg-void transition-opacity`}
           >
             <MoreHorizontal className="w-4 h-4" />
@@ -129,7 +201,7 @@ function GroupMsg({
           <MessageActionMenu
             isMe={isMe}
             canCreatorDelete={canCreatorDelete}
-            align={isMe ? 'right' : 'left'}
+            anchorRect={anchorRect}
             onEdit={() => onEdit(msg)}
             onDeleteMe={() => onDeleteMe(msg._id)}
             onDeleteEveryone={() => onDeleteEveryone(msg._id)}
@@ -735,10 +807,14 @@ export default function GroupChat() {
               No messages yet. Start the conversation!
             </div>
           )}
-          {messages.map((msg) => {
+          {messages.map((msg, idx) => {
+            const showSeparator =
+              idx === 0 || !isSameDay(msg.createdAt, messages[idx - 1].createdAt)
+
             if (msg._deletedByCreator) {
               return (
                 <div key={msg._id} ref={(el) => { if (el) messageRefs.current[msg._id] = el }}>
+                  {showSeparator && <DateSeparator label={getDateLabel(msg.createdAt)} />}
                   <DeletedByCreatorNotice
                     msg={{ ...msg, _deletedByCreatorName: msg._deletedByCreatorName }}
                     currentUserId={currentUserId}
@@ -750,25 +826,29 @@ export default function GroupChat() {
               <div
                 key={msg._id}
                 ref={(el) => { if (el) messageRefs.current[msg._id] = el }}
-                className={`rounded-lg transition-all duration-500 ${
-                  highlightedMessageId === msg._id
-                    ? 'outline outline-2 outline-accent/60 bg-accent/5 shadow-glow-sm'
-                    : ''
-                }`}
               >
-                <GroupMsg
-                  msg={msg}
-                  currentUserId={currentUserId}
-                  isCurrentUserCreator={currentUserIsCreator}
-                  onEdit={startEdit}
-                  onDeleteMe={deleteForMe}
-                  onDeleteEveryone={deleteForEveryone}
-                  editingId={editingId}
-                  editText={editText}
-                  setEditText={setEditText}
-                  onSaveEdit={saveEdit}
-                  onCancelEdit={cancelEdit}
-                />
+                {showSeparator && <DateSeparator label={getDateLabel(msg.createdAt)} />}
+                <div
+                  className={`rounded-lg transition-all duration-500 ${
+                    highlightedMessageId === msg._id
+                      ? 'outline outline-2 outline-accent/60 bg-accent/5 shadow-glow-sm'
+                      : ''
+                  }`}
+                >
+                  <GroupMsg
+                    msg={msg}
+                    currentUserId={currentUserId}
+                    isCurrentUserCreator={currentUserIsCreator}
+                    onEdit={startEdit}
+                    onDeleteMe={deleteForMe}
+                    onDeleteEveryone={deleteForEveryone}
+                    editingId={editingId}
+                    editText={editText}
+                    setEditText={setEditText}
+                    onSaveEdit={saveEdit}
+                    onCancelEdit={cancelEdit}
+                  />
+                </div>
               </div>
             )
           })}
