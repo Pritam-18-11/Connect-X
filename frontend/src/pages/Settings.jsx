@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import AppLayout from '../components/AppLayout'
 import api from '../utils/api'
 import { useAuth } from '../context/AuthContext'
-import { User, Shield, Bell, Trash2, Save, Check } from 'lucide-react'
+import { User, Shield, Bell, Trash2, Save, Check, AlertCircle, X } from 'lucide-react'
 
 export default function Settings() {
-  const { user } = useAuth()
+  const { user, logout } = useAuth()
+  const navigate = useNavigate()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -13,6 +15,12 @@ export default function Settings() {
   const [autoReject, setAutoReject] = useState(false)
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [deleteConfirmText, setDeleteConfirmText] = useState('')
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
 
   useEffect(() => {
     if (user) {
@@ -23,14 +31,38 @@ export default function Settings() {
 
   const handleSave = async () => {
     setSaving(true)
+    setError('')
     try {
-      await new Promise((r) => setTimeout(r, 500))
+      const payload = { name, email }
+      if (password.trim()) payload.password = password.trim()
+
+      const { data } = await api.put('/auth/me', payload)
+
+      // Update sessionStorage user info so UI reflects new name/email immediately
+      const savedUser = JSON.parse(sessionStorage.getItem('user') || '{}')
+      const updatedUser = { ...savedUser, name: data.user.name, email: data.user.email }
+      sessionStorage.setItem('user', JSON.stringify(updatedUser))
+
+      setPassword('')
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
     } catch (err) {
-      console.error('Save error:', err)
+      setError(err.response?.data?.message || 'Failed to save changes.')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleDeleteAccount = async () => {
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      await api.delete('/auth/me')
+      logout()
+      navigate('/login')
+    } catch (err) {
+      setDeleteError(err.response?.data?.message || 'Failed to delete account.')
+      setDeleting(false)
     }
   }
 
@@ -45,6 +77,13 @@ export default function Settings() {
           <h1 className="text-2xl font-semibold text-text mb-1">Settings</h1>
           <p className="text-text-dim text-sm font-mono">Manage your account and privacy preferences</p>
         </div>
+
+        {error && (
+          <div className="flex items-center gap-2 bg-danger/10 border border-danger/30 text-danger rounded px-4 py-3 mb-6 font-mono text-sm">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            {error}
+          </div>
+        )}
 
         {/* Profile */}
         <Section icon={User} title="Profile">
@@ -104,7 +143,9 @@ export default function Settings() {
           <p className="text-text-dim text-sm font-mono mb-4">
             Permanently delete your account and all associated data. This cannot be undone.
           </p>
-          <button className="btn-danger">Delete Account</button>
+          <button onClick={() => setShowDeleteModal(true)} className="btn-danger">
+            Delete Account
+          </button>
         </Section>
 
         <button
@@ -116,6 +157,67 @@ export default function Settings() {
           {saved ? 'Saved!' : saving ? 'Saving...' : 'Save Changes'}
         </button>
       </div>
+
+      {/* Delete Account Modal */}
+      {showDeleteModal && (
+        <div
+          className="fixed inset-0 bg-void/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={() => !deleting && setShowDeleteModal(false)}
+        >
+          <div
+            className="panel p-6 w-full max-w-sm border border-danger/30 relative"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setShowDeleteModal(false)}
+              disabled={deleting}
+              className="absolute top-4 right-4 text-muted hover:text-text transition-colors disabled:opacity-40"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <Trash2 className="w-10 h-10 text-danger mx-auto mb-4" />
+            <h3 className="text-text font-semibold text-lg mb-2 text-center">Delete your account?</h3>
+            <p className="text-text-dim text-sm font-mono mb-4 text-center leading-relaxed">
+              This will permanently delete your account, connections, messages, and groups you created. This cannot be undone.
+            </p>
+
+            {deleteError && (
+              <div className="flex items-center gap-2 bg-danger/10 border border-danger/30 text-danger rounded px-3 py-2 mb-4 font-mono text-xs">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {deleteError}
+              </div>
+            )}
+
+            <label className="block text-text-dim text-xs font-mono uppercase tracking-widest mb-2">
+              Type <span className="text-danger">DELETE</span> to confirm
+            </label>
+            <input
+              type="text"
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              placeholder="DELETE"
+              className="input-field mb-4"
+            />
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                disabled={deleting}
+                className="btn-ghost flex-1 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteAccount}
+                disabled={deleting || deleteConfirmText !== 'DELETE'}
+                className="btn-danger flex-1 disabled:opacity-40"
+              >
+                {deleting ? 'Deleting...' : 'Delete Forever'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppLayout>
   )
 }
