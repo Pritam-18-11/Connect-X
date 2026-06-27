@@ -1,10 +1,14 @@
 const express = require('express')
 const router = express.Router()
+const multer = require('multer')
 const Message = require('../models/Message')
 const Connection = require('../models/Connection')
 const MessageLimit = require('../models/MessageLimit')
 const { protect } = require('../middleware/auth')
 const { getIO } = require('../socket/socketManager')
+const cloudinary = require('../utils/cloudinary')
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }) // 10MB max
 
 async function areConnected(userId1, userId2) {
   const conn = await Connection.findOne({
@@ -48,7 +52,6 @@ async function checkMessageLimit(senderUserId, receiverUserId) {
 }
 
 // ── GET /api/chat/stats/today ─────────────────────────────────
-// IMPORTANT: must come before /:userId route
 router.get('/stats/today', protect, async (req, res) => {
   try {
     const startOfDay = new Date()
@@ -79,7 +82,6 @@ router.get('/:userId', protect, async (req, res) => {
         { senderId: req.user._id, receiverId: req.params.userId },
         { senderId: req.params.userId, receiverId: req.user._id },
       ],
-      // Hide messages this user deleted "for me"
       deletedFor: { $ne: req.user._id },
     }).sort({ createdAt: 1 })
 
@@ -113,12 +115,79 @@ router.post('/send', protect, async (req, res) => {
       senderId: req.user._id,
       receiverId,
       text: text.trim(),
+      messageType: 'text',
     })
 
     res.status(201).json(message)
   } catch (error) {
     console.error('Send message error:', error.message)
     res.status(500).json({ message: 'Failed to send message.' })
+  }
+})
+
+// ── POST /api/chat/send-voice ──────────────────────────────────
+// multipart/form-data: audio (file), receiverId, duration
+router.post('/send-voice', protect, upload.single('audio'), async (req, res) => {
+  try {
+    const { receiverId, duration } = req.body
+
+    if (!req.file) {
+      return res.status(400).json({ message: 'No audio file provided.' })
+    }
+    if (!receiverId) {
+      return res.status(400).json({ message: 'receiverId is required.' })
+    }
+
+    const connected = await areConnected(req.user._id, receiverId)
+    if (!connected) {
+      return res.status(403).json({ message: 'You are not connected with this user.' })
+    }
+
+    const limitCheck = await checkMessageLimit(req.user._id, receiverId)
+    if (!limitCheck.allowed) {
+      return res.status(429).json({ message: limitCheck.message })
+    }
+
+    // Upload to Cloudinary (audio as 'video' resource_type — Cloudinary requires this for audio files)
+    const base64Audio = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`
+    const uploadResult = await cloudinary.uploader.upload(base64Audio, {
+      resource_type: 'video', // Cloudinary treats audio under 'video' resource type
+      folder: 'connectx/voice-messages',
+      format: 'mp3',
+    })
+
+    const message = await Message.create({
+      senderId: req.user._id,
+      receiverId,
+      text: '',
+      messageType: 'voice',
+      audioUrl: uploadResult.secure_url,
+      audioDuration: duration ? Number(duration) : null,
+    })
+
+    const msgData = {
+      _id: message._id,
+      senderId: req.user._id,
+      receiverId,
+      text: '',
+      messageType: 'voice',
+      audioUrl: message.audioUrl,
+      audioDuration: message.audioDuration,
+      seen: false,
+      isEdited: false,
+      createdAt: message.createdAt,
+    }
+
+    // Notify receiver in real-time, same as socket text messages
+    const io = getIO()
+    if (io) {
+      io.to(receiverId).emit('receive_message', msgData)
+    }
+
+    res.status(201).json(message)
+  } catch (error) {
+    console.error('Send voice message error:', error.message)
+    res.status(500).json({ message: 'Failed to send voice message.' })
   }
 })
 
@@ -139,7 +208,6 @@ router.put('/seen/:messageId', protect, async (req, res) => {
 })
 
 // ── PUT /api/chat/edit/:messageId ─────────────────────────────
-// Only the original sender can edit their own message. No "(edited)" trace is shown.
 router.put('/edit/:messageId', protect, async (req, res) => {
   try {
     const { text } = req.body
@@ -152,6 +220,10 @@ router.put('/edit/:messageId', protect, async (req, res) => {
 
     if (message.senderId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'You can only edit your own messages.' })
+    }
+
+    if (message.messageType === 'voice') {
+      return res.status(400).json({ message: 'Voice messages cannot be edited.' })
     }
 
     if (message.isDeletedForEveryone) {
@@ -185,7 +257,7 @@ router.put('/edit/:messageId', protect, async (req, res) => {
 // ── DELETE /api/chat/:messageId?for=me|everyone ───────────────
 router.delete('/:messageId', protect, async (req, res) => {
   try {
-    const { for: deleteFor } = req.query // 'me' | 'everyone'
+    const { for: deleteFor } = req.query
     const message = await Message.findById(req.params.messageId)
     if (!message) return res.status(404).json({ message: 'Message not found.' })
 
@@ -210,7 +282,6 @@ router.delete('/:messageId', protect, async (req, res) => {
       return res.json({ success: true })
     }
 
-    // Delete for me only — add to deletedFor array
     if (!message.deletedFor.some((id) => id.toString() === userId)) {
       message.deletedFor.push(req.user._id)
       await message.save()

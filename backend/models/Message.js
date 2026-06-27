@@ -14,8 +14,21 @@ const messageSchema = new mongoose.Schema(
     },
     text: {
       type: String,
-      required: true,
       trim: true,
+      default: '',
+    },
+    messageType: {
+      type: String,
+      enum: ['text', 'voice'],
+      default: 'text',
+    },
+    audioUrl: {
+      type: String,
+      default: null,
+    },
+    audioDuration: {
+      type: Number, // seconds
+      default: null,
     },
     seen: {
       type: Boolean,

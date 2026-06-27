@@ -43,6 +43,7 @@ function initSocket(server) {
       methods: ['GET', 'POST'],
       credentials: true,
     },
+    maxHttpBufferSize: 1e7, // 10MB — not used for voice (handled via REST), kept safe default
   })
 
   io.use(async (socket, next) => {
@@ -67,7 +68,6 @@ function initSocket(server) {
     socket.join(userId)
     io.emit('user_online', { userId })
 
-    // Join all group rooms this user belongs to
     try {
       const groups = await Group.find({ members: socket.user._id })
       groups.forEach((group) => {
@@ -77,7 +77,7 @@ function initSocket(server) {
       console.error('Error joining group rooms:', err.message)
     }
 
-    // ── Private Message ───────────────────────────────────────
+    // ── Private Message (text) ─────────────────────────────────
     socket.on('send_message', async ({ receiverId, text }) => {
       try {
         if (!text || !text.trim()) return
@@ -102,6 +102,7 @@ function initSocket(server) {
           senderId: userId,
           receiverId,
           text: text.trim(),
+          messageType: 'text',
         })
 
         const msgData = {
@@ -109,6 +110,7 @@ function initSocket(server) {
           senderId: userId,
           receiverId,
           text: message.text,
+          messageType: 'text',
           seen: false,
           isEdited: false,
           createdAt: message.createdAt,
@@ -154,7 +156,7 @@ function initSocket(server) {
       socket.join(`group_${groupId}`)
     })
 
-    // ── Group: Send message ───────────────────────────────────
+    // ── Group: Send message (text) ─────────────────────────────
     socket.on('group_send_message', async ({ groupId, text }) => {
       try {
         if (!text || !text.trim()) return
@@ -167,6 +169,7 @@ function initSocket(server) {
           groupId,
           senderId: userId,
           text: text.trim(),
+          messageType: 'text',
         })
 
         const msgData = {
@@ -174,6 +177,7 @@ function initSocket(server) {
           groupId,
           senderId: { _id: userId, name: socket.user.name },
           text: message.text,
+          messageType: 'text',
           isEdited: false,
           createdAt: message.createdAt,
         }
@@ -185,7 +189,6 @@ function initSocket(server) {
     })
 
     // ── Group: Edit message ───────────────────────────────────
-    // Only the original sender can edit. No "(edited)" trace shown to anyone.
     socket.on('group_edit_message', async ({ messageId, text }) => {
       try {
         if (!text || !text.trim()) return
@@ -194,6 +197,7 @@ function initSocket(server) {
         if (!message) return
         if (message.senderId.toString() !== userId) return
         if (message.isDeletedForEveryone) return
+        if (message.messageType === 'voice') return // voice messages can't be edited
 
         message.text = text.trim()
         message.isEdited = true
@@ -209,15 +213,6 @@ function initSocket(server) {
     })
 
     // ── Group: Delete message ─────────────────────────────────
-    // deleteFor: 'me' | 'everyone'
-    // - Sender deleting own message: removed for everyone, no trace anywhere.
-    // - Creator deleting someone else's message:
-    //     -> The original sender's room (their personal userId room) is
-    //        EXCLUDED from the generic "deleted" broadcast, and instead gets
-    //        ONLY the targeted "deleted by creator" event. This removes any
-    //        race condition — the sender's client can never receive both
-    //        events and never has to reconcile ordering.
-    //     -> Everyone else in the group just sees the message vanish.
     socket.on('group_delete_message', async ({ messageId, deleteFor }) => {
       try {
         const message = await GroupMessage.findById(messageId)
@@ -231,20 +226,14 @@ function initSocket(server) {
         const groupRoom = `group_${message.groupId}`
 
         if (deleteFor === 'everyone') {
-          if (!isSender && !isGroupCreator) return // not authorized
+          if (!isSender && !isGroupCreator) return
 
           if (isSender) {
-            // Sender deleting their own message — fully gone for everyone, no trace
             await GroupMessage.findByIdAndDelete(message._id)
             io.to(groupRoom).emit('group_message_deleted', { messageId: message._id })
             return
           }
 
-          // Creator deleting someone else's message.
-          // Broadcast the generic "vanish" event to the room EXCEPT the
-          // original sender's personal room, so the sender's client only
-          // ever receives the targeted notice event below — no ordering
-          // ambiguity, no race condition.
           const senderUserId = message.senderId.toString()
 
           io.to(groupRoom).except(senderUserId).emit('group_message_deleted', {
@@ -260,7 +249,6 @@ function initSocket(server) {
           return
         }
 
-        // Delete for me only
         if (!message.deletedFor.some((id) => id.toString() === userId)) {
           message.deletedFor.push(userId)
           await message.save()

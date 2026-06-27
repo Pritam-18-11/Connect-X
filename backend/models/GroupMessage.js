@@ -14,8 +14,21 @@ const groupMessageSchema = new mongoose.Schema(
     },
     text: {
       type: String,
-      required: true,
       trim: true,
+      default: '',
+    },
+    messageType: {
+      type: String,
+      enum: ['text', 'voice'],
+      default: 'text',
+    },
+    audioUrl: {
+      type: String,
+      default: null,
+    },
+    audioDuration: {
+      type: Number,
+      default: null,
     },
     isEdited: {
       type: Boolean,
@@ -25,8 +38,6 @@ const groupMessageSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-    // Set when the Creator deletes someone else's message.
-    // Only the original sender should see the "deleted by X" notice.
     deletedByCreator: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',

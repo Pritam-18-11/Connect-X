@@ -1,5 +1,6 @@
 const express = require('express')
 const router = express.Router()
+const multer = require('multer')
 const Group = require('../models/Group')
 const GroupInvitation = require('../models/GroupInvitation')
 const GroupJoinRequest = require('../models/GroupJoinRequest')
@@ -8,6 +9,10 @@ const AdminActionRequest = require('../models/AdminActionRequest')
 const Connection = require('../models/Connection')
 const User = require('../models/User')
 const { protect } = require('../middleware/auth')
+const { getIO } = require('../socket/socketManager')
+const cloudinary = require('../utils/cloudinary')
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } })
 
 function generateCode() {
   return Math.random().toString(36).substring(2, 12).toUpperCase()
@@ -370,6 +375,61 @@ router.get('/:id([0-9a-fA-F]{24})/messages', protect, async (req, res) => {
   } catch (err) {
     console.error('Get group messages error:', err.message)
     res.status(500).json({ message: 'Failed to fetch messages.' })
+  }
+})
+
+// ── POST /api/groups/:id/send-voice — Group voice message ─────
+router.post('/:id([0-9a-fA-F]{24})/send-voice', protect, upload.single('audio'), async (req, res) => {
+  try {
+    const { duration } = req.body
+    const rawGroup = await Group.findById(req.params.id)
+    if (!rawGroup) return res.status(404).json({ message: 'Group not found.' })
+
+    if (!isMember(rawGroup, req.user._id)) {
+      return res.status(403).json({ message: 'Not a member.' })
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ message: 'No audio file provided.' })
+    }
+
+    const base64Audio = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`
+    const uploadResult = await cloudinary.uploader.upload(base64Audio, {
+      resource_type: 'video',
+      folder: 'connectx/voice-messages',
+      format: 'mp3',
+    })
+
+    const message = await GroupMessage.create({
+      groupId: req.params.id,
+      senderId: req.user._id,
+      text: '',
+      messageType: 'voice',
+      audioUrl: uploadResult.secure_url,
+      audioDuration: duration ? Number(duration) : null,
+    })
+
+    const msgData = {
+      _id: message._id,
+      groupId: req.params.id,
+      senderId: { _id: req.user._id, name: req.user.name },
+      text: '',
+      messageType: 'voice',
+      audioUrl: message.audioUrl,
+      audioDuration: message.audioDuration,
+      isEdited: false,
+      createdAt: message.createdAt,
+    }
+
+    const io = getIO()
+    if (io) {
+      io.to(`group_${req.params.id}`).emit('receive_group_message', msgData)
+    }
+
+    res.status(201).json(message)
+  } catch (err) {
+    console.error('Group send voice message error:', err.message)
+    res.status(500).json({ message: 'Failed to send voice message.' })
   }
 })
 

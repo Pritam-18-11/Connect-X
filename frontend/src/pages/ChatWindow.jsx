@@ -7,7 +7,7 @@ import { useSocket } from '../context/SocketContext'
 import {
   Send, ShieldOff, Settings2, Clock, MoreVertical,
   X, Check, CheckCheck, AlertTriangle, AlertCircle, Ban,
-  Pencil, Trash2, MoreHorizontal,
+  Pencil, Trash2, MoreHorizontal, Mic, Square, Play, Pause, Trash,
 } from 'lucide-react'
 
 // ── Date helpers ────────────────────────────────────────────────
@@ -21,7 +21,6 @@ function getDateLabel(dateStr) {
   if (dayDiff === 0) return 'Today'
   if (dayDiff === 1) return 'Yesterday'
 
-  // Older than yesterday → exact date
   const sameYear = date.getFullYear() === now.getFullYear()
   return date.toLocaleDateString('en-US', {
     day: 'numeric',
@@ -50,9 +49,82 @@ function DateSeparator({ label }) {
   )
 }
 
-// ── Action menu — positions itself relative to viewport so it never gets
-// clipped or pushes layout around (uses fixed positioning + measured coords)
-function MessageActionMenu({ isMe, onEdit, onDeleteMe, onDeleteEveryone, onClose, anchorRect }) {
+function formatDuration(seconds) {
+  if (!seconds || isNaN(seconds)) return '0:00'
+  const m = Math.floor(seconds / 60)
+  const s = Math.floor(seconds % 60)
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
+
+// ── Voice Message Bubble — playback ──────────────────────────────
+function VoiceBubble({ msg, isMe }) {
+  const audioRef = useRef(null)
+  const [playing, setPlaying] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const duration = msg.audioDuration || 0
+
+  const togglePlay = () => {
+    if (!audioRef.current) return
+    if (playing) {
+      audioRef.current.pause()
+    } else {
+      audioRef.current.play()
+    }
+  }
+
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    const onTimeUpdate = () => setCurrentTime(audio.currentTime)
+    const onEnded = () => { setPlaying(false); setCurrentTime(0) }
+    const onPlay = () => setPlaying(true)
+    const onPause = () => setPlaying(false)
+
+    audio.addEventListener('timeupdate', onTimeUpdate)
+    audio.addEventListener('ended', onEnded)
+    audio.addEventListener('play', onPlay)
+    audio.addEventListener('pause', onPause)
+
+    return () => {
+      audio.removeEventListener('timeupdate', onTimeUpdate)
+      audio.removeEventListener('ended', onEnded)
+      audio.removeEventListener('play', onPlay)
+      audio.removeEventListener('pause', onPause)
+    }
+  }, [])
+
+  const progress = duration > 0 ? (currentTime / duration) * 100 : 0
+
+  return (
+    <div className="flex items-center gap-3 min-w-[200px]">
+      <audio ref={audioRef} src={msg.audioUrl} preload="metadata" />
+      <button
+        onClick={togglePlay}
+        className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-colors ${
+          isMe ? 'bg-void/20 hover:bg-void/30' : 'bg-accent/15 hover:bg-accent/25'
+        }`}
+      >
+        {playing
+          ? <Pause className={`w-4 h-4 ${isMe ? 'text-void' : 'text-accent'}`} />
+          : <Play className={`w-4 h-4 ${isMe ? 'text-void' : 'text-accent'}`} />}
+      </button>
+      <div className="flex-1 min-w-0">
+        <div className={`h-1.5 rounded-full overflow-hidden ${isMe ? 'bg-void/20' : 'bg-border'}`}>
+          <div
+            className={`h-full rounded-full transition-all ${isMe ? 'bg-void' : 'bg-accent'}`}
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+        <p className={`text-xs mt-1 font-mono ${isMe ? 'text-void/70' : 'text-text-dim'}`}>
+          {formatDuration(playing || currentTime > 0 ? currentTime : duration)}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+// ── Action menu ──────────────────────────────────────────────────
+function MessageActionMenu({ isMe, isVoice, onEdit, onDeleteMe, onDeleteEveryone, onClose, anchorRect }) {
   const menuRef = useRef(null)
   const [style, setStyle] = useState({ top: 0, left: 0, visibility: 'hidden' })
 
@@ -62,16 +134,12 @@ function MessageActionMenu({ isMe, onEdit, onDeleteMe, onDeleteEveryone, onClose
     const menuHeight = menuRef.current.offsetHeight || 120
     const gap = 6
 
-    // Own messages (right side) → menu opens to the LEFT of the message.
-    // Others' messages (left side) → menu opens to the RIGHT of the message.
     let left = isMe
       ? anchorRect.left - menuWidth - gap
       : anchorRect.right + gap
 
-    // Clamp horizontally within viewport
     left = Math.max(8, Math.min(left, window.innerWidth - menuWidth - 8))
 
-    // Vertically align with the trigger, clamp within viewport
     let top = anchorRect.top
     top = Math.max(8, Math.min(top, window.innerHeight - menuHeight - 8))
 
@@ -85,7 +153,7 @@ function MessageActionMenu({ isMe, onEdit, onDeleteMe, onDeleteEveryone, onClose
       className="z-50 w-48 panel border border-border py-1 shadow-modal"
       onClick={(e) => e.stopPropagation()}
     >
-      {isMe && (
+      {isMe && !isVoice && (
         <button
           onClick={() => { onEdit(); onClose() }}
           className="w-full flex items-center gap-2.5 px-3 py-2 text-text-dim hover:text-text hover:bg-void text-xs font-mono transition-colors"
@@ -121,6 +189,7 @@ function Message({
       : msg.senderId?.toString()
 
   const isMe = senderId === currentUserId
+  const isVoice = msg.messageType === 'voice'
   const [showMenu, setShowMenu] = useState(false)
   const [anchorRect, setAnchorRect] = useState(null)
   const triggerRef = useRef(null)
@@ -158,6 +227,14 @@ function Message({
                 <button onClick={onSaveEdit} className={`text-xs font-semibold hover:underline ${isMe ? 'text-void' : 'text-text'}`}>Save</button>
               </div>
             </div>
+          ) : isVoice ? (
+            <>
+              <VoiceBubble msg={msg} isMe={isMe} />
+              <div className={`flex items-center justify-end gap-1 mt-1 text-xs ${isMe ? 'text-void/60' : 'text-text-dim'}`}>
+                <span>{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                {isMe && (msg.seen ? <CheckCheck className="w-3 h-3" /> : <Check className="w-3 h-3" />)}
+              </div>
+            </>
           ) : (
             <>
               <p>{msg.text}</p>
@@ -169,7 +246,6 @@ function Message({
           )}
         </div>
 
-        {/* Hover action trigger */}
         {!isEditing && (
           <button
             ref={triggerRef}
@@ -183,6 +259,7 @@ function Message({
         {showMenu && (
           <MessageActionMenu
             isMe={isMe}
+            isVoice={isVoice}
             anchorRect={anchorRect}
             onEdit={() => onEdit(msg)}
             onDeleteMe={() => onDeleteMe(msg._id)}
@@ -264,13 +341,23 @@ export default function ChatWindow() {
   const [editingId, setEditingId] = useState(null)
   const [editText, setEditText] = useState('')
 
+  // Voice recording state
+  const [isRecording, setIsRecording] = useState(false)
+  const [recordedBlob, setRecordedBlob] = useState(null)
+  const [recordedUrl, setRecordedUrl] = useState(null)
+  const [recordDuration, setRecordDuration] = useState(0)
+  const [sendingVoice, setSendingVoice] = useState(false)
+  const mediaRecorderRef = useRef(null)
+  const recordedChunksRef = useRef([])
+  const recordTimerRef = useRef(null)
+  const recordStartRef = useRef(null)
+
   const bottomRef = useRef(null)
   const typingTimeoutRef = useRef(null)
 
   const currentUserId = String(user?.id || user?._id || '')
   const isOnline = onlineUsers.includes(otherUserId)
 
-  // Chat open হলে unread dot clear করো
   useEffect(() => {
     if (otherUserId) clearUnread(otherUserId)
   }, [otherUserId])
@@ -401,8 +488,87 @@ export default function ChatWindow() {
     setInput('')
   }
 
+  // ── Voice Recording ───────────────────────────────────────────
+  const startRecording = async () => {
+    if (!canSend) return
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mediaRecorder = new MediaRecorder(stream)
+      mediaRecorderRef.current = mediaRecorder
+      recordedChunksRef.current = []
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordedChunksRef.current.push(e.data)
+      }
+
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(recordedChunksRef.current, { type: 'audio/webm' })
+        setRecordedBlob(blob)
+        setRecordedUrl(URL.createObjectURL(blob))
+        stream.getTracks().forEach((track) => track.stop())
+      }
+
+      mediaRecorder.start()
+      setIsRecording(true)
+      recordStartRef.current = Date.now()
+      setRecordDuration(0)
+      recordTimerRef.current = setInterval(() => {
+        setRecordDuration(Math.floor((Date.now() - recordStartRef.current) / 1000))
+      }, 200)
+    } catch (err) {
+      console.error('Microphone access error:', err)
+      alert('Could not access microphone. Please allow microphone permission.')
+    }
+  }
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop()
+      setIsRecording(false)
+      clearInterval(recordTimerRef.current)
+    }
+  }
+
+  const cancelRecordedVoice = () => {
+    setRecordedBlob(null)
+    if (recordedUrl) URL.revokeObjectURL(recordedUrl)
+    setRecordedUrl(null)
+    setRecordDuration(0)
+  }
+
+  const sendVoiceMessage = async () => {
+    if (!recordedBlob) return
+    setSendingVoice(true)
+    try {
+      const formData = new FormData()
+      formData.append('audio', recordedBlob, 'voice-message.webm')
+      formData.append('receiverId', otherUserId)
+      formData.append('duration', recordDuration)
+
+      const { data } = await api.post('/chat/send-voice', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+
+      setMessages((prev) => [...prev, data])
+      cancelRecordedVoice()
+    } catch (err) {
+      console.error('Send voice message error:', err)
+      setLimitError(err.response?.data?.message || 'Failed to send voice message.')
+    } finally {
+      setSendingVoice(false)
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      clearInterval(recordTimerRef.current)
+      if (recordedUrl) URL.revokeObjectURL(recordedUrl)
+    }
+  }, [])
+
   // ── Edit / Delete handlers ─────────────────────────────────
   const startEdit = (msg) => {
+    if (msg.messageType === 'voice') return
     setEditingId(msg._id)
     setEditText(msg.text)
   }
@@ -669,22 +835,72 @@ export default function ChatWindow() {
 
         {/* Input */}
         <div className="shrink-0 border-t border-border px-6 py-4 bg-panel">
-          <form onSubmit={sendMessage} className="flex gap-3 items-center">
-            <input
-              value={input}
-              onChange={handleInputChange}
-              placeholder={canSend ? 'Type a message...' : 'Messaging unavailable'}
-              className="input-field flex-1"
-              disabled={!canSend}
-            />
-            <button
-              type="submit"
-              disabled={!input.trim() || !canSend}
-              className="w-11 h-11 rounded bg-accent flex items-center justify-center text-void hover:bg-accent-dim transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0 shadow-glow-sm"
-            >
-              <Send className="w-4 h-4" />
-            </button>
-          </form>
+          {recordedBlob ? (
+            // ── Recorded voice preview before sending ──
+            <div className="flex items-center gap-3">
+              <button
+                onClick={cancelRecordedVoice}
+                className="w-10 h-10 rounded-full flex items-center justify-center text-danger hover:bg-danger/10 transition-colors shrink-0"
+              >
+                <Trash className="w-4 h-4" />
+              </button>
+              <div className="flex-1 flex items-center gap-3 bg-void border border-border rounded-lg px-4 py-2.5">
+                <audio src={recordedUrl} controls className="w-full h-8" />
+              </div>
+              <button
+                onClick={sendVoiceMessage}
+                disabled={sendingVoice}
+                className="w-11 h-11 rounded bg-accent flex items-center justify-center text-void hover:bg-accent-dim transition-colors disabled:opacity-40 shrink-0 shadow-glow-sm"
+              >
+                {sendingVoice
+                  ? <div className="w-4 h-4 border-2 border-void border-t-transparent rounded-full animate-spin" />
+                  : <Send className="w-4 h-4" />}
+              </button>
+            </div>
+          ) : isRecording ? (
+            // ── Recording in progress ──
+            <div className="flex items-center gap-3">
+              <button
+                onClick={stopRecording}
+                className="w-11 h-11 rounded-full bg-danger flex items-center justify-center text-white shrink-0 animate-pulse"
+              >
+                <Square className="w-4 h-4 fill-current" />
+              </button>
+              <div className="flex-1 flex items-center gap-2 text-danger font-mono text-sm">
+                <span className="w-2 h-2 rounded-full bg-danger animate-pulse" />
+                Recording... {formatDuration(recordDuration)}
+              </div>
+            </div>
+          ) : (
+            // ── Default text input + mic button ──
+            <form onSubmit={sendMessage} className="flex gap-3 items-center">
+              <input
+                value={input}
+                onChange={handleInputChange}
+                placeholder={canSend ? 'Type a message...' : 'Messaging unavailable'}
+                className="input-field flex-1"
+                disabled={!canSend}
+              />
+              {input.trim() ? (
+                <button
+                  type="submit"
+                  disabled={!canSend}
+                  className="w-11 h-11 rounded bg-accent flex items-center justify-center text-void hover:bg-accent-dim transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0 shadow-glow-sm"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={startRecording}
+                  disabled={!canSend}
+                  className="w-11 h-11 rounded bg-accent flex items-center justify-center text-void hover:bg-accent-dim transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0 shadow-glow-sm"
+                >
+                  <Mic className="w-4 h-4" />
+                </button>
+              )}
+            </form>
+          )}
         </div>
       </div>
 
