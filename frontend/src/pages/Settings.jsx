@@ -16,6 +16,7 @@ export default function Settings() {
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [loadingPrefs, setLoadingPrefs] = useState(true)
 
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deleteConfirmText, setDeleteConfirmText] = useState('')
@@ -27,20 +28,43 @@ export default function Settings() {
       setName(user.name || '')
       setEmail(user.email || '')
     }
+    fetchLatestPrefs()
   }, [user])
+
+  const fetchLatestPrefs = async () => {
+    try {
+      const { data } = await api.get('/auth/me')
+      setAutoReject(!!data.autoRejectInvites)
+      setNotifications(data.notificationsEnabled !== false)
+    } catch (err) {
+      console.error('Failed to fetch preferences:', err)
+    } finally {
+      setLoadingPrefs(false)
+    }
+  }
 
   const handleSave = async () => {
     setSaving(true)
     setError('')
     try {
-      const payload = { name, email }
+      const payload = {
+        name,
+        email,
+        autoRejectInvites: autoReject,
+        notificationsEnabled: notifications,
+      }
       if (password.trim()) payload.password = password.trim()
 
       const { data } = await api.put('/auth/me', payload)
 
-      // Update sessionStorage user info so UI reflects new name/email immediately
       const savedUser = JSON.parse(sessionStorage.getItem('user') || '{}')
-      const updatedUser = { ...savedUser, name: data.user.name, email: data.user.email }
+      const updatedUser = {
+        ...savedUser,
+        name: data.user.name,
+        email: data.user.email,
+        autoRejectInvites: data.user.autoRejectInvites,
+        notificationsEnabled: data.user.notificationsEnabled,
+      }
       sessionStorage.setItem('user', JSON.stringify(updatedUser))
 
       setPassword('')
@@ -120,22 +144,30 @@ export default function Settings() {
 
         {/* Privacy */}
         <Section icon={Shield} title="Privacy">
-          <Toggle
-            label="Auto-reject unknown invites"
-            desc="Automatically reject connection requests without reviewing"
-            value={autoReject}
-            onChange={setAutoReject}
-          />
+          {loadingPrefs ? (
+            <div className="w-5 h-5 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+          ) : (
+            <Toggle
+              label="Auto-reject unknown invites"
+              desc="Automatically reject connection requests without reviewing"
+              value={autoReject}
+              onChange={setAutoReject}
+            />
+          )}
         </Section>
 
         {/* Notifications */}
         <Section icon={Bell} title="Notifications">
-          <Toggle
-            label="Enable notifications"
-            desc="Receive alerts for new messages and connection requests"
-            value={notifications}
-            onChange={setNotifications}
-          />
+          {loadingPrefs ? (
+            <div className="w-5 h-5 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+          ) : (
+            <Toggle
+              label="Enable notifications"
+              desc="Receive alerts for new messages and connection requests"
+              value={notifications}
+              onChange={setNotifications}
+            />
+          )}
         </Section>
 
         {/* Danger */}

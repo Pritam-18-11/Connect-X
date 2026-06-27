@@ -23,6 +23,14 @@ const userSchema = new mongoose.Schema(
       required: [true, 'Password is required'],
       minlength: [6, 'Password must be at least 6 characters'],
     },
+    autoRejectInvites: {
+      type: Boolean,
+      default: false,
+    },
+    notificationsEnabled: {
+      type: Boolean,
+      default: true,
+    },
   },
   { timestamps: true }
 )

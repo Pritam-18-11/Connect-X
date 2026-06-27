@@ -3,6 +3,7 @@ const router = express.Router()
 const ConnectionRequest = require('../models/ConnectionRequest')
 const Connection = require('../models/Connection')
 const InviteCode = require('../models/InviteCode')
+const User = require('../models/User')
 const { protect } = require('../middleware/auth')
 
 // ── POST /api/connections/request ─────────────────────────────
@@ -47,6 +48,23 @@ router.post('/request', protect, async (req, res) => {
     invite.isUsed = true
     await invite.save()
 
+    // Receiver-এর preference check করো — auto-reject অন থাকলে সাথে সাথেই reject
+    const receiver = await User.findById(receiverId)
+    if (receiver?.autoRejectInvites) {
+      const request = await ConnectionRequest.create({
+        senderId,
+        receiverId,
+        inviteCodeId: invite._id,
+        status: 'rejected',
+      })
+      return res.status(201).json({
+        success: true,
+        message: 'Connection request sent.',
+        request,
+        autoRejected: true,
+      })
+    }
+
     const request = await ConnectionRequest.create({
       senderId,
       receiverId,
@@ -68,7 +86,6 @@ router.get('/requests', protect, async (req, res) => {
       status: 'pending',
     }).populate('senderId', 'name email')
 
-    // Skip requests where the sender no longer exists (deleted account)
     const validRequests = requests.filter((r) => r.senderId)
 
     res.json(validRequests)
@@ -135,7 +152,6 @@ router.get('/list', protect, async (req, res) => {
       .populate('user2', 'name email')
 
     const connectedUsers = connections
-      // Skip broken connections where the other user was deleted from DB
       .filter((conn) => conn.user1 && conn.user2)
       .map((conn) => {
         const other =
@@ -201,7 +217,6 @@ router.delete('/revoke/:connectionId', protect, async (req, res) => {
 // ── GET /api/connections/status/:userId ───────────────────────
 router.get('/status/:userId', protect, async (req, res) => {
   try {
-    // Find the latest ACTIVE connection first
     const activeConnection = await Connection.findOne({
       $or: [
         { user1: req.user._id, user2: req.params.userId },
@@ -215,7 +230,6 @@ router.get('/status/:userId', protect, async (req, res) => {
       return res.json({ status: 'connected', connectionId: activeConnection._id })
     }
 
-    // Check if revoked (but may have been reconnected later)
     const revokedConnection = await Connection.findOne({
       $or: [
         { user1: req.user._id, user2: req.params.userId },

@@ -14,6 +14,7 @@ const AdminActionRequest = require('../models/AdminActionRequest')
 const PrivateChatRequest = require('../models/PrivateChatRequest')
 const InviteCode = require('../models/InviteCode')
 const { protect } = require('../middleware/auth')
+const { authLimiter } = require('../middleware/rateLimiter')
 
 const router = express.Router()
 
@@ -25,7 +26,7 @@ const generateToken = (id) => {
 }
 
 // ─── POST /api/auth/register ──────────────────────────────────
-router.post('/register', async (req, res) => {
+router.post('/register', authLimiter, async (req, res) => {
   try {
     const { name, email, password } = req.body
 
@@ -54,7 +55,7 @@ router.post('/register', async (req, res) => {
 })
 
 // ─── POST /api/auth/login ─────────────────────────────────────
-router.post('/login', async (req, res) => {
+router.post('/login', authLimiter, async (req, res) => {
   try {
     const { email, password } = req.body
 
@@ -79,6 +80,8 @@ router.post('/login', async (req, res) => {
         name: user.name,
         email: user.email,
         createdAt: user.createdAt,
+        autoRejectInvites: user.autoRejectInvites,
+        notificationsEnabled: user.notificationsEnabled,
       },
     })
   } catch (error) {
@@ -94,13 +97,15 @@ router.get('/me', protect, async (req, res) => {
     name: req.user.name,
     email: req.user.email,
     createdAt: req.user.createdAt,
+    autoRejectInvites: req.user.autoRejectInvites,
+    notificationsEnabled: req.user.notificationsEnabled,
   })
 })
 
 // ─── PUT /api/auth/me — Update profile ─────────────────────────
 router.put('/me', protect, async (req, res) => {
   try {
-    const { name, email, password } = req.body
+    const { name, email, password, autoRejectInvites, notificationsEnabled } = req.body
     const user = await User.findById(req.user._id)
 
     if (!user) {
@@ -130,6 +135,14 @@ router.put('/me', protect, async (req, res) => {
       user.password = password // pre-save hook will hash it
     }
 
+    if (typeof autoRejectInvites === 'boolean') {
+      user.autoRejectInvites = autoRejectInvites
+    }
+
+    if (typeof notificationsEnabled === 'boolean') {
+      user.notificationsEnabled = notificationsEnabled
+    }
+
     await user.save()
 
     res.json({
@@ -139,6 +152,8 @@ router.put('/me', protect, async (req, res) => {
         name: user.name,
         email: user.email,
         createdAt: user.createdAt,
+        autoRejectInvites: user.autoRejectInvites,
+        notificationsEnabled: user.notificationsEnabled,
       },
     })
   } catch (error) {
@@ -152,13 +167,11 @@ router.delete('/me', protect, async (req, res) => {
   try {
     const userId = req.user._id
 
-    // Remove user from all groups (members/admins), but keep group/messages intact
     await Group.updateMany(
       { $or: [{ members: userId }, { admins: userId }] },
       { $pull: { members: userId, admins: userId } }
     )
 
-    // Delete groups created solely by this user along with their messages
     const ownedGroups = await Group.find({ createdBy: userId })
     const ownedGroupIds = ownedGroups.map((g) => g._id)
     if (ownedGroupIds.length > 0) {
@@ -169,7 +182,6 @@ router.delete('/me', protect, async (req, res) => {
       await Group.deleteMany({ _id: { $in: ownedGroupIds } })
     }
 
-    // Clean up everything tied to this user
     await Promise.all([
       Connection.deleteMany({ $or: [{ user1: userId }, { user2: userId }] }),
       ConnectionRequest.deleteMany({ $or: [{ senderId: userId }, { receiverId: userId }] }),
