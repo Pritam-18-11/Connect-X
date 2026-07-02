@@ -8,7 +8,10 @@ const { protect } = require('../middleware/auth')
 const { getIO } = require('../socket/socketManager')
 const cloudinary = require('../utils/cloudinary')
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }) // 10MB max
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+})
 
 async function areConnected(userId1, userId2) {
   const conn = await Connection.findOne({
@@ -24,30 +27,24 @@ async function areConnected(userId1, userId2) {
 
 async function checkMessageLimit(senderUserId, receiverUserId) {
   const today = new Date().toISOString().slice(0, 10)
-
   const limit = await MessageLimit.findOne({
     ownerUserId: receiverUserId,
     targetUserId: senderUserId,
   })
-
   if (!limit) return { allowed: true }
-
   if (limit.lastResetDate !== today) {
     limit.currentCount = 0
     limit.lastResetDate = today
     await limit.save()
   }
-
   if (limit.currentCount >= limit.dailyLimit) {
     return {
       allowed: false,
       message: `Daily message limit of ${limit.dailyLimit} reached. Try again tomorrow.`,
     }
   }
-
   limit.currentCount += 1
   await limit.save()
-
   return { allowed: true, remaining: limit.dailyLimit - limit.currentCount }
 }
 
@@ -56,12 +53,10 @@ router.get('/stats/today', protect, async (req, res) => {
   try {
     const startOfDay = new Date()
     startOfDay.setHours(0, 0, 0, 0)
-
     const count = await Message.countDocuments({
       senderId: req.user._id,
       createdAt: { $gte: startOfDay },
     })
-
     res.json({ count })
   } catch (error) {
     console.error('Get today stats error:', error.message)
@@ -76,7 +71,6 @@ router.get('/:userId', protect, async (req, res) => {
     if (!connected) {
       return res.status(403).json({ message: 'You are not connected with this user.' })
     }
-
     const messages = await Message.find({
       $or: [
         { senderId: req.user._id, receiverId: req.params.userId },
@@ -84,7 +78,6 @@ router.get('/:userId', protect, async (req, res) => {
       ],
       deletedFor: { $ne: req.user._id },
     }).sort({ createdAt: 1 })
-
     res.json(messages)
   } catch (error) {
     console.error('Get chat error:', error.message)
@@ -96,28 +89,23 @@ router.get('/:userId', protect, async (req, res) => {
 router.post('/send', protect, async (req, res) => {
   try {
     const { receiverId, text } = req.body
-
     if (!text || !text.trim()) {
       return res.status(400).json({ message: 'Message cannot be empty.' })
     }
-
     const connected = await areConnected(req.user._id, receiverId)
     if (!connected) {
       return res.status(403).json({ message: 'You are not connected with this user.' })
     }
-
     const limitCheck = await checkMessageLimit(req.user._id, receiverId)
     if (!limitCheck.allowed) {
       return res.status(429).json({ message: limitCheck.message })
     }
-
     const message = await Message.create({
       senderId: req.user._id,
       receiverId,
       text: text.trim(),
       messageType: 'text',
     })
-
     res.status(201).json(message)
   } catch (error) {
     console.error('Send message error:', error.message)
@@ -125,33 +113,22 @@ router.post('/send', protect, async (req, res) => {
   }
 })
 
-// ── POST /api/chat/send-voice ──────────────────────────────────
-// multipart/form-data: audio (file), receiverId, duration
+// ── POST /api/chat/send-voice ─────────────────────────────────
 router.post('/send-voice', protect, upload.single('audio'), async (req, res) => {
   try {
     const { receiverId, duration } = req.body
-
-    if (!req.file) {
-      return res.status(400).json({ message: 'No audio file provided.' })
-    }
-    if (!receiverId) {
-      return res.status(400).json({ message: 'receiverId is required.' })
-    }
+    if (!req.file) return res.status(400).json({ message: 'No audio file provided.' })
+    if (!receiverId) return res.status(400).json({ message: 'receiverId is required.' })
 
     const connected = await areConnected(req.user._id, receiverId)
-    if (!connected) {
-      return res.status(403).json({ message: 'You are not connected with this user.' })
-    }
+    if (!connected) return res.status(403).json({ message: 'You are not connected with this user.' })
 
     const limitCheck = await checkMessageLimit(req.user._id, receiverId)
-    if (!limitCheck.allowed) {
-      return res.status(429).json({ message: limitCheck.message })
-    }
+    if (!limitCheck.allowed) return res.status(429).json({ message: limitCheck.message })
 
-    // Upload to Cloudinary (audio as 'video' resource_type — Cloudinary requires this for audio files)
     const base64Audio = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`
     const uploadResult = await cloudinary.uploader.upload(base64Audio, {
-      resource_type: 'video', // Cloudinary treats audio under 'video' resource type
+      resource_type: 'video',
       folder: 'connectx/voice-messages',
       format: 'mp3',
     })
@@ -178,11 +155,8 @@ router.post('/send-voice', protect, upload.single('audio'), async (req, res) => 
       createdAt: message.createdAt,
     }
 
-    // Notify receiver in real-time, same as socket text messages
     const io = getIO()
-    if (io) {
-      io.to(receiverId).emit('receive_message', msgData)
-    }
+    if (io) io.to(receiverId).emit('receive_message', msgData)
 
     res.status(201).json(message)
   } catch (error) {
@@ -191,15 +165,62 @@ router.post('/send-voice', protect, upload.single('audio'), async (req, res) => 
   }
 })
 
+// ── POST /api/chat/send-image ─────────────────────────────────
+router.post('/send-image', protect, upload.single('image'), async (req, res) => {
+  try {
+    const { receiverId } = req.body
+    if (!req.file) return res.status(400).json({ message: 'No image file provided.' })
+    if (!receiverId) return res.status(400).json({ message: 'receiverId is required.' })
+
+    const connected = await areConnected(req.user._id, receiverId)
+    if (!connected) return res.status(403).json({ message: 'You are not connected with this user.' })
+
+    const limitCheck = await checkMessageLimit(req.user._id, receiverId)
+    if (!limitCheck.allowed) return res.status(429).json({ message: limitCheck.message })
+
+    const base64Image = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`
+    const uploadResult = await cloudinary.uploader.upload(base64Image, {
+      resource_type: 'image',
+      folder: 'connectx/image-messages',
+    })
+
+    const message = await Message.create({
+      senderId: req.user._id,
+      receiverId,
+      text: '',
+      messageType: 'image',
+      imageUrl: uploadResult.secure_url,
+    })
+
+    const msgData = {
+      _id: message._id,
+      senderId: req.user._id,
+      receiverId,
+      text: '',
+      messageType: 'image',
+      imageUrl: message.imageUrl,
+      seen: false,
+      isEdited: false,
+      createdAt: message.createdAt,
+    }
+
+    const io = getIO()
+    if (io) io.to(receiverId).emit('receive_message', msgData)
+
+    res.status(201).json(message)
+  } catch (error) {
+    console.error('Send image message error:', error.message)
+    res.status(500).json({ message: 'Failed to send image.' })
+  }
+})
+
 // ── PUT /api/chat/seen/:messageId ─────────────────────────────
 router.put('/seen/:messageId', protect, async (req, res) => {
   try {
     const message = await Message.findById(req.params.messageId)
     if (!message) return res.status(404).json({ message: 'Message not found.' })
-
     message.seen = true
     await message.save()
-
     res.json({ success: true })
   } catch (error) {
     console.error('Mark seen error:', error.message)
@@ -211,21 +232,16 @@ router.put('/seen/:messageId', protect, async (req, res) => {
 router.put('/edit/:messageId', protect, async (req, res) => {
   try {
     const { text } = req.body
-    if (!text || !text.trim()) {
-      return res.status(400).json({ message: 'Message cannot be empty.' })
-    }
+    if (!text || !text.trim()) return res.status(400).json({ message: 'Message cannot be empty.' })
 
     const message = await Message.findById(req.params.messageId)
     if (!message) return res.status(404).json({ message: 'Message not found.' })
-
     if (message.senderId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'You can only edit your own messages.' })
     }
-
-    if (message.messageType === 'voice') {
-      return res.status(400).json({ message: 'Voice messages cannot be edited.' })
+    if (message.messageType !== 'text') {
+      return res.status(400).json({ message: 'Only text messages can be edited.' })
     }
-
     if (message.isDeletedForEveryone) {
       return res.status(400).json({ message: 'Cannot edit a deleted message.' })
     }
@@ -263,7 +279,6 @@ router.delete('/:messageId', protect, async (req, res) => {
 
     const userId = req.user._id.toString()
     const isSender = message.senderId.toString() === userId
-
     const otherUserId = isSender
       ? message.receiverId.toString()
       : message.senderId.toString()
@@ -273,12 +288,8 @@ router.delete('/:messageId', protect, async (req, res) => {
         return res.status(403).json({ message: 'You can only delete your own messages for everyone.' })
       }
       await Message.findByIdAndDelete(message._id)
-
       const io = getIO()
-      if (io) {
-        io.to(otherUserId).emit('message_deleted', { messageId: message._id })
-      }
-
+      if (io) io.to(otherUserId).emit('message_deleted', { messageId: message._id })
       return res.json({ success: true })
     }
 
@@ -286,7 +297,6 @@ router.delete('/:messageId', protect, async (req, res) => {
       message.deletedFor.push(req.user._id)
       await message.save()
     }
-
     res.json({ success: true })
   } catch (error) {
     console.error('Delete message error:', error.message)

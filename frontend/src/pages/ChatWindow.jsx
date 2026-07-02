@@ -8,35 +8,28 @@ import {
   Send, ShieldOff, Settings2, Clock, MoreVertical,
   X, Check, CheckCheck, AlertTriangle, AlertCircle, Ban,
   Pencil, Trash2, MoreHorizontal, Mic, Square, Play, Pause, Trash,
+  ImageIcon, ZoomIn,
 } from 'lucide-react'
 
 // ── Date helpers ────────────────────────────────────────────────
 function getDateLabel(dateStr) {
   const date = new Date(dateStr)
   const now = new Date()
-
   const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate())
   const dayDiff = (startOfDay(now) - startOfDay(date)) / (1000 * 60 * 60 * 24)
-
   if (dayDiff === 0) return 'Today'
   if (dayDiff === 1) return 'Yesterday'
-
   const sameYear = date.getFullYear() === now.getFullYear()
   return date.toLocaleDateString('en-US', {
-    day: 'numeric',
-    month: 'short',
-    year: sameYear ? undefined : 'numeric',
+    day: 'numeric', month: 'short', year: sameYear ? undefined : 'numeric',
   })
 }
 
 function isSameDay(d1, d2) {
-  const a = new Date(d1)
-  const b = new Date(d2)
-  return (
-    a.getFullYear() === b.getFullYear() &&
+  const a = new Date(d1), b = new Date(d2)
+  return a.getFullYear() === b.getFullYear() &&
     a.getMonth() === b.getMonth() &&
     a.getDate() === b.getDate()
-  )
 }
 
 function DateSeparator({ label }) {
@@ -56,7 +49,50 @@ function formatDuration(seconds) {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-// ── Voice Message Bubble — playback ──────────────────────────────
+// ── Image Lightbox ────────────────────────────────────────────
+function ImageLightbox({ src, onClose }) {
+  return (
+    <div
+      className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <button onClick={onClose} className="absolute top-4 right-4 text-white hover:text-gray-300">
+        <X className="w-6 h-6" />
+      </button>
+      <img
+        src={src}
+        alt="Full size"
+        className="max-w-full max-h-full object-contain rounded-lg"
+        onClick={(e) => e.stopPropagation()}
+      />
+    </div>
+  )
+}
+
+// ── Image Bubble ──────────────────────────────────────────────
+function ImageBubble({ src, isMe }) {
+  const [lightbox, setLightbox] = useState(false)
+  return (
+    <>
+      <div
+        className="relative cursor-pointer group/img"
+        onClick={() => setLightbox(true)}
+      >
+        <img
+          src={src}
+          alt="Image message"
+          className="max-w-[220px] max-h-[220px] rounded-lg object-cover border border-white/10"
+        />
+        <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/20 rounded-lg transition-all flex items-center justify-center">
+          <ZoomIn className="w-6 h-6 text-white opacity-0 group-hover/img:opacity-100 transition-opacity" />
+        </div>
+      </div>
+      {lightbox && <ImageLightbox src={src} onClose={() => setLightbox(false)} />}
+    </>
+  )
+}
+
+// ── Voice Message Bubble ──────────────────────────────────────
 function VoiceBubble({ msg, isMe }) {
   const audioRef = useRef(null)
   const [playing, setPlaying] = useState(false)
@@ -65,11 +101,7 @@ function VoiceBubble({ msg, isMe }) {
 
   const togglePlay = () => {
     if (!audioRef.current) return
-    if (playing) {
-      audioRef.current.pause()
-    } else {
-      audioRef.current.play()
-    }
+    playing ? audioRef.current.pause() : audioRef.current.play()
   }
 
   useEffect(() => {
@@ -79,12 +111,10 @@ function VoiceBubble({ msg, isMe }) {
     const onEnded = () => { setPlaying(false); setCurrentTime(0) }
     const onPlay = () => setPlaying(true)
     const onPause = () => setPlaying(false)
-
     audio.addEventListener('timeupdate', onTimeUpdate)
     audio.addEventListener('ended', onEnded)
     audio.addEventListener('play', onPlay)
     audio.addEventListener('pause', onPause)
-
     return () => {
       audio.removeEventListener('timeupdate', onTimeUpdate)
       audio.removeEventListener('ended', onEnded)
@@ -123,8 +153,8 @@ function VoiceBubble({ msg, isMe }) {
   )
 }
 
-// ── Action menu ──────────────────────────────────────────────────
-function MessageActionMenu({ isMe, isVoice, onEdit, onDeleteMe, onDeleteEveryone, onClose, anchorRect }) {
+// ── Message Action Menu ───────────────────────────────────────
+function MessageActionMenu({ isMe, isVoice, isImage, onEdit, onDeleteMe, onDeleteEveryone, onClose, anchorRect }) {
   const menuRef = useRef(null)
   const [style, setStyle] = useState({ top: 0, left: 0, visibility: 'hidden' })
 
@@ -133,16 +163,10 @@ function MessageActionMenu({ isMe, isVoice, onEdit, onDeleteMe, onDeleteEveryone
     const menuWidth = menuRef.current.offsetWidth || 192
     const menuHeight = menuRef.current.offsetHeight || 120
     const gap = 6
-
-    let left = isMe
-      ? anchorRect.left - menuWidth - gap
-      : anchorRect.right + gap
-
+    let left = isMe ? anchorRect.left - menuWidth - gap : anchorRect.right + gap
     left = Math.max(8, Math.min(left, window.innerWidth - menuWidth - 8))
-
     let top = anchorRect.top
     top = Math.max(8, Math.min(top, window.innerHeight - menuHeight - 8))
-
     setStyle({ top, left, visibility: 'visible' })
   }, [anchorRect, isMe])
 
@@ -153,7 +177,7 @@ function MessageActionMenu({ isMe, isVoice, onEdit, onDeleteMe, onDeleteEveryone
       className="z-50 w-48 panel border border-border py-1 shadow-modal"
       onClick={(e) => e.stopPropagation()}
     >
-      {isMe && !isVoice && (
+      {isMe && !isVoice && !isImage && (
         <button
           onClick={() => { onEdit(); onClose() }}
           className="w-full flex items-center gap-2.5 px-3 py-2 text-text-dim hover:text-text hover:bg-void text-xs font-mono transition-colors"
@@ -187,9 +211,9 @@ function Message({
     typeof msg.senderId === 'object'
       ? msg.senderId?._id?.toString()
       : msg.senderId?.toString()
-
   const isMe = senderId === currentUserId
   const isVoice = msg.messageType === 'voice'
+  const isImage = msg.messageType === 'image'
   const [showMenu, setShowMenu] = useState(false)
   const [anchorRect, setAnchorRect] = useState(null)
   const triggerRef = useRef(null)
@@ -205,13 +229,13 @@ function Message({
   return (
     <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-3 group`}>
       <div className="relative max-w-xs lg:max-w-sm">
-        <div className={`px-4 py-2.5 rounded-lg text-sm font-mono leading-relaxed ${
+        <div className={`${isImage ? 'p-1' : 'px-4 py-2.5'} rounded-lg text-sm font-mono leading-relaxed ${
           isMe
             ? 'bg-accent text-void rounded-br-sm'
             : 'bg-panel border border-border text-text rounded-bl-sm'
         }`}>
           {isEditing ? (
-            <div className="space-y-2">
+            <div className="space-y-2 px-3 py-1">
               <input
                 value={editText}
                 onChange={(e) => setEditText(e.target.value)}
@@ -225,6 +249,14 @@ function Message({
               <div className="flex gap-2 justify-end">
                 <button onClick={onCancelEdit} className={`text-xs opacity-80 hover:opacity-100 ${isMe ? 'text-void' : 'text-text-dim'}`}>Cancel</button>
                 <button onClick={onSaveEdit} className={`text-xs font-semibold hover:underline ${isMe ? 'text-void' : 'text-text'}`}>Save</button>
+              </div>
+            </div>
+          ) : isImage ? (
+            <div>
+              <ImageBubble src={msg.imageUrl} isMe={isMe} />
+              <div className={`flex items-center justify-end gap-1 mt-1 px-2 pb-1 text-xs ${isMe ? 'text-void/60' : 'text-text-dim'}`}>
+                <span>{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                {isMe && (msg.seen ? <CheckCheck className="w-3 h-3" /> : <Check className="w-3 h-3" />)}
               </div>
             </div>
           ) : isVoice ? (
@@ -260,6 +292,7 @@ function Message({
           <MessageActionMenu
             isMe={isMe}
             isVoice={isVoice}
+            isImage={isImage}
             anchorRect={anchorRect}
             onEdit={() => onEdit(msg)}
             onDeleteMe={() => onDeleteMe(msg._id)}
@@ -297,10 +330,7 @@ function Modal({ children, onClose }) {
         className="panel p-6 w-full max-w-sm border border-border relative"
         onClick={(e) => e.stopPropagation()}
       >
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 text-muted hover:text-text transition-colors"
-        >
+        <button onClick={onClose} className="absolute top-4 right-4 text-muted hover:text-text transition-colors">
           <X className="w-4 h-4" />
         </button>
         {children}
@@ -351,6 +381,12 @@ export default function ChatWindow() {
   const recordedChunksRef = useRef([])
   const recordTimerRef = useRef(null)
   const recordStartRef = useRef(null)
+
+  // Image state
+  const [selectedImage, setSelectedImage] = useState(null)
+  const [imagePreviewUrl, setImagePreviewUrl] = useState(null)
+  const [sendingImage, setSendingImage] = useState(false)
+  const imageInputRef = useRef(null)
 
   const bottomRef = useRef(null)
   const typingTimeoutRef = useRef(null)
@@ -410,33 +446,18 @@ export default function ChatWindow() {
         clearUnread(otherUserId)
       }
     }
-    const handleSent = (msg) => {
-      setMessages((prev) => [...prev, msg])
-      setLimitError('')
-    }
-    const handleTyping = ({ senderId }) => {
-      if (senderId === otherUserId) setIsTyping(true)
-    }
-    const handleStopTyping = ({ senderId }) => {
-      if (senderId === otherUserId) setIsTyping(false)
-    }
+    const handleSent = (msg) => { setMessages((prev) => [...prev, msg]); setLimitError('') }
+    const handleTyping = ({ senderId }) => { if (senderId === otherUserId) setIsTyping(true) }
+    const handleStopTyping = ({ senderId }) => { if (senderId === otherUserId) setIsTyping(false) }
     const handleSeen = ({ messageId }) => {
-      setMessages((prev) =>
-        prev.map((m) => (m._id === messageId ? { ...m, seen: true } : m))
-      )
+      setMessages((prev) => prev.map((m) => (m._id === messageId ? { ...m, seen: true } : m)))
     }
     const handleRevoked = ({ by }) => {
-      if (by === otherUserId) {
-        alert('This connection has been revoked.')
-        navigate('/dashboard')
-      }
+      if (by === otherUserId) { alert('This connection has been revoked.'); navigate('/dashboard') }
     }
     const handleLimitReached = ({ message }) => setLimitError(message)
-
     const handleEdited = ({ messageId, text }) => {
-      setMessages((prev) =>
-        prev.map((m) => (m._id === messageId ? { ...m, text } : m))
-      )
+      setMessages((prev) => prev.map((m) => (m._id === messageId ? { ...m, text } : m)))
     }
     const handleDeleted = ({ messageId }) => {
       setMessages((prev) => prev.filter((m) => m._id !== messageId))
@@ -488,7 +509,48 @@ export default function ChatWindow() {
     setInput('')
   }
 
-  // ── Voice Recording ───────────────────────────────────────────
+  // ── Image handlers ────────────────────────────────────────────
+  const handleImageSelect = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      alert('Please select an image file.')
+      return
+    }
+    setSelectedImage(file)
+    setImagePreviewUrl(URL.createObjectURL(file))
+  }
+
+  const cancelSelectedImage = () => {
+    setSelectedImage(null)
+    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl)
+    setImagePreviewUrl(null)
+    if (imageInputRef.current) imageInputRef.current.value = ''
+  }
+
+  const sendImageMessage = async () => {
+    if (!selectedImage) return
+    setSendingImage(true)
+    try {
+      const formData = new FormData()
+      formData.append('image', selectedImage)
+      formData.append('receiverId', otherUserId)
+
+      const { data } = await api.post('/chat/send-image', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+
+      setMessages((prev) => [...prev, data])
+      cancelSelectedImage()
+    } catch (err) {
+      console.error('Send image error:', err)
+      setLimitError(err.response?.data?.message || 'Failed to send image.')
+    } finally {
+      setSendingImage(false)
+    }
+  }
+
+  // ── Voice handlers ────────────────────────────────────────────
   const startRecording = async () => {
     if (!canSend) return
     try {
@@ -500,7 +562,6 @@ export default function ChatWindow() {
       mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) recordedChunksRef.current.push(e.data)
       }
-
       mediaRecorder.onstop = () => {
         const blob = new Blob(recordedChunksRef.current, { type: 'audio/webm' })
         setRecordedBlob(blob)
@@ -563,20 +624,18 @@ export default function ChatWindow() {
     return () => {
       clearInterval(recordTimerRef.current)
       if (recordedUrl) URL.revokeObjectURL(recordedUrl)
+      if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl)
     }
   }, [])
 
-  // ── Edit / Delete handlers ─────────────────────────────────
+  // ── Edit / Delete ─────────────────────────────────────────────
   const startEdit = (msg) => {
-    if (msg.messageType === 'voice') return
+    if (msg.messageType !== 'text') return
     setEditingId(msg._id)
     setEditText(msg.text)
   }
 
-  const cancelEdit = () => {
-    setEditingId(null)
-    setEditText('')
-  }
+  const cancelEdit = () => { setEditingId(null); setEditText('') }
 
   const saveEdit = async () => {
     if (!editText.trim() || !editingId) return
@@ -713,19 +772,11 @@ export default function ChatWindow() {
             <div className="flex items-center gap-2">
               <p className="text-text font-medium text-sm">{otherUser?.name}</p>
               {isBlocked && (
-                <span className="tag text-xs text-danger border-danger/30 bg-danger/10">
-                  Blocked
-                </span>
+                <span className="tag text-xs text-danger border-danger/30 bg-danger/10">Blocked</span>
               )}
             </div>
             <p className="text-text-dim text-xs font-mono">
-              {isBlocked
-                ? 'You blocked this user'
-                : blockedByThem
-                ? 'You are blocked'
-                : isOnline
-                ? 'Online'
-                : 'Offline'}
+              {isBlocked ? 'You blocked this user' : blockedByThem ? 'You are blocked' : isOnline ? 'Online' : 'Offline'}
               {currentLimit && !isBlocked && (
                 <span className="ml-2 text-warn">· Limit: {currentLimit.dailyLimit}/day</span>
               )}
@@ -784,25 +835,17 @@ export default function ChatWindow() {
         {(isBlocked || blockedByThem) && (
           <div className="shrink-0 mx-6 mt-4 flex items-center gap-2 bg-danger/10 border border-danger/30 text-danger rounded px-4 py-2.5 font-mono text-xs">
             <Ban className="w-4 h-4 shrink-0" />
-            {isBlocked
-              ? 'You have blocked this user. Unblock to send messages.'
-              : 'You cannot send messages to this user.'}
+            {isBlocked ? 'You have blocked this user. Unblock to send messages.' : 'You cannot send messages to this user.'}
           </div>
         )}
 
         {/* Messages */}
-        <div
-          className="flex-1 overflow-y-auto px-6 py-4"
-          onClick={() => setShowMenu(false)}
-        >
+        <div className="flex-1 overflow-y-auto px-6 py-4" onClick={() => setShowMenu(false)}>
           {messages.length === 0 && (
-            <div className="text-center text-text-dim font-mono text-sm mt-8">
-              No messages yet. Say hello!
-            </div>
+            <div className="text-center text-text-dim font-mono text-sm mt-8">No messages yet. Say hello!</div>
           )}
           {messages.map((msg, idx) => {
-            const showSeparator =
-              idx === 0 || !isSameDay(msg.createdAt, messages[idx - 1].createdAt)
+            const showSeparator = idx === 0 || !isSameDay(msg.createdAt, messages[idx - 1].createdAt)
             return (
               <div key={msg._id}>
                 {showSeparator && <DateSeparator label={getDateLabel(msg.createdAt)} />}
@@ -825,7 +868,7 @@ export default function ChatWindow() {
           <div ref={bottomRef} />
         </div>
 
-        {/* Limit error bar */}
+        {/* Limit error */}
         {limitError && (
           <div className="shrink-0 mx-6 mb-2 flex items-center gap-2 bg-warn/10 border border-warn/30 text-warn rounded px-4 py-2.5 font-mono text-xs">
             <AlertCircle className="w-4 h-4 shrink-0" />
@@ -833,15 +876,45 @@ export default function ChatWindow() {
           </div>
         )}
 
-        {/* Input */}
+        {/* Input Area */}
         <div className="shrink-0 border-t border-border px-6 py-4 bg-panel">
-          {recordedBlob ? (
-            // ── Recorded voice preview before sending ──
-            <div className="flex items-center gap-3">
+
+          {/* Image preview before send */}
+          {selectedImage && (
+            <div className="flex items-center gap-3 mb-3">
+              <div className="relative">
+                <img
+                  src={imagePreviewUrl}
+                  alt="Preview"
+                  className="w-20 h-20 object-cover rounded-lg border border-border"
+                />
+                <button
+                  onClick={cancelSelectedImage}
+                  className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-danger text-white flex items-center justify-center"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+              <div className="flex-1 text-text-dim text-xs font-mono">
+                <p>{selectedImage.name}</p>
+                <p>{(selectedImage.size / 1024).toFixed(1)} KB</p>
+              </div>
               <button
-                onClick={cancelRecordedVoice}
-                className="w-10 h-10 rounded-full flex items-center justify-center text-danger hover:bg-danger/10 transition-colors shrink-0"
+                onClick={sendImageMessage}
+                disabled={sendingImage}
+                className="w-11 h-11 rounded bg-accent flex items-center justify-center text-void hover:bg-accent-dim transition-colors disabled:opacity-40 shrink-0 shadow-glow-sm"
               >
+                {sendingImage
+                  ? <div className="w-4 h-4 border-2 border-void border-t-transparent rounded-full animate-spin" />
+                  : <Send className="w-4 h-4" />}
+              </button>
+            </div>
+          )}
+
+          {/* Voice recorded preview */}
+          {recordedBlob && !selectedImage ? (
+            <div className="flex items-center gap-3">
+              <button onClick={cancelRecordedVoice} className="w-10 h-10 rounded-full flex items-center justify-center text-danger hover:bg-danger/10 transition-colors shrink-0">
                 <Trash className="w-4 h-4" />
               </button>
               <div className="flex-1 flex items-center gap-3 bg-void border border-border rounded-lg px-4 py-2.5">
@@ -858,12 +931,8 @@ export default function ChatWindow() {
               </button>
             </div>
           ) : isRecording ? (
-            // ── Recording in progress ──
             <div className="flex items-center gap-3">
-              <button
-                onClick={stopRecording}
-                className="w-11 h-11 rounded-full bg-danger flex items-center justify-center text-white shrink-0 animate-pulse"
-              >
+              <button onClick={stopRecording} className="w-11 h-11 rounded-full bg-danger flex items-center justify-center text-white shrink-0 animate-pulse">
                 <Square className="w-4 h-4 fill-current" />
               </button>
               <div className="flex-1 flex items-center gap-2 text-danger font-mono text-sm">
@@ -871,9 +940,27 @@ export default function ChatWindow() {
                 Recording... {formatDuration(recordDuration)}
               </div>
             </div>
-          ) : (
-            // ── Default text input + mic button ──
+          ) : !selectedImage ? (
             <form onSubmit={sendMessage} className="flex gap-3 items-center">
+              {/* Hidden image input */}
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleImageSelect}
+              />
+              {/* Image button */}
+              <button
+                type="button"
+                onClick={() => canSend && imageInputRef.current?.click()}
+                disabled={!canSend}
+                className="w-10 h-10 rounded flex items-center justify-center text-text-dim hover:text-accent hover:bg-accent/10 transition-colors disabled:opacity-40 shrink-0"
+                title="Send image"
+              >
+                <ImageIcon className="w-5 h-5" />
+              </button>
+
               <input
                 value={input}
                 onChange={handleInputChange}
@@ -900,7 +987,7 @@ export default function ChatWindow() {
                 </button>
               )}
             </form>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -915,21 +1002,13 @@ export default function ChatWindow() {
                 Blocking will stop all messages. Do you also want to permanently revoke this connection?
               </p>
               <div className="space-y-3">
-                <button
-                  onClick={handleBlock}
-                  className="w-full py-3 rounded border border-warn/40 bg-warn/10 text-warn font-mono text-sm hover:bg-warn/20 transition-all"
-                >
+                <button onClick={handleBlock} className="w-full py-3 rounded border border-warn/40 bg-warn/10 text-warn font-mono text-sm hover:bg-warn/20 transition-all">
                   Block Only (keep connection)
                 </button>
-                <button
-                  onClick={() => setBlockPhase('confirm-revoke')}
-                  className="w-full py-3 rounded border border-danger/40 bg-danger/10 text-danger font-mono text-sm hover:bg-danger/20 transition-all"
-                >
+                <button onClick={() => setBlockPhase('confirm-revoke')} className="w-full py-3 rounded border border-danger/40 bg-danger/10 text-danger font-mono text-sm hover:bg-danger/20 transition-all">
                   Block + Revoke Connection
                 </button>
-                <button onClick={() => setShowBlockModal(false)} className="btn-ghost w-full">
-                  Cancel
-                </button>
+                <button onClick={() => setShowBlockModal(false)} className="btn-ghost w-full">Cancel</button>
               </div>
             </div>
           )}
@@ -938,18 +1017,11 @@ export default function ChatWindow() {
               <AlertTriangle className="w-10 h-10 text-danger mx-auto mb-4" />
               <h3 className="text-text font-semibold text-lg mb-2">Are you sure?</h3>
               <p className="text-text-dim text-sm font-mono mb-6 leading-relaxed">
-                This will permanently revoke the connection with{' '}
-                <span className="text-accent">{otherUser?.name}</span>.
+                This will permanently revoke the connection with <span className="text-accent">{otherUser?.name}</span>.
               </p>
               <div className="flex gap-3">
-                <button onClick={() => setBlockPhase('choose')} className="btn-ghost flex-1">
-                  Go Back
-                </button>
-                <button
-                  onClick={handleRevoke}
-                  disabled={revoking}
-                  className="btn-danger flex-1 disabled:opacity-60"
-                >
+                <button onClick={() => setBlockPhase('choose')} className="btn-ghost flex-1">Go Back</button>
+                <button onClick={handleRevoke} disabled={revoking} className="btn-danger flex-1 disabled:opacity-60">
                   {revoking ? 'Revoking...' : 'Yes, Revoke'}
                 </button>
               </div>
@@ -965,18 +1037,11 @@ export default function ChatWindow() {
             <AlertTriangle className="w-10 h-10 text-danger mx-auto mb-4" />
             <h3 className="text-text font-semibold text-lg mb-2">Are you sure?</h3>
             <p className="text-text-dim text-sm font-mono mb-6 leading-relaxed">
-              This will permanently remove your connection with{' '}
-              <span className="text-accent">{otherUser?.name}</span>.
+              This will permanently remove your connection with <span className="text-accent">{otherUser?.name}</span>.
             </p>
             <div className="flex gap-3">
-              <button onClick={() => setShowRevokeModal(false)} className="btn-ghost flex-1">
-                Cancel
-              </button>
-              <button
-                onClick={handleRevoke}
-                disabled={revoking}
-                className="btn-danger flex-1 disabled:opacity-60"
-              >
+              <button onClick={() => setShowRevokeModal(false)} className="btn-ghost flex-1">Cancel</button>
+              <button onClick={handleRevoke} disabled={revoking} className="btn-danger flex-1 disabled:opacity-60">
                 {revoking ? 'Revoking...' : 'Revoke'}
               </button>
             </div>
@@ -989,8 +1054,7 @@ export default function ChatWindow() {
         <Modal onClose={() => setShowLimitModal(false)}>
           <h3 className="text-text font-semibold text-lg mb-1">Set Daily Message Limit</h3>
           <p className="text-text-dim text-sm font-mono mb-2">
-            Limit how many messages{' '}
-            <span className="text-accent">{otherUser?.name}</span> can send per day.
+            Limit how many messages <span className="text-accent">{otherUser?.name}</span> can send per day.
           </p>
           {currentLimit && (
             <p className="text-warn text-xs font-mono mb-4">
@@ -1022,11 +1086,7 @@ export default function ChatWindow() {
           >
             Remove Limit
           </button>
-          <button
-            onClick={handleSaveLimit}
-            disabled={limitLoading}
-            className="btn-primary w-full disabled:opacity-60"
-          >
+          <button onClick={handleSaveLimit} disabled={limitLoading} className="btn-primary w-full disabled:opacity-60">
             {limitLoading ? 'Saving...' : 'Save Limit'}
           </button>
         </Modal>
@@ -1036,9 +1096,7 @@ export default function ChatWindow() {
       {showTimedModal && (
         <Modal onClose={() => setShowTimedModal(false)}>
           <h3 className="text-text font-semibold text-lg mb-1">Timed Connection</h3>
-          <p className="text-text-dim text-sm font-mono mb-6">
-            Set an expiry for this connection
-          </p>
+          <p className="text-text-dim text-sm font-mono mb-6">Set an expiry for this connection</p>
           <div className="grid grid-cols-3 gap-2 mb-6">
             {[7, 15, 30, 60, 90, null].map((days) => (
               <button
@@ -1054,9 +1112,7 @@ export default function ChatWindow() {
               </button>
             ))}
           </div>
-          <button onClick={() => setShowTimedModal(false)} className="btn-primary w-full">
-            Apply
-          </button>
+          <button onClick={() => setShowTimedModal(false)} className="btn-primary w-full">Apply</button>
         </Modal>
       )}
     </AppLayout>

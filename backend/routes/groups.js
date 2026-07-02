@@ -433,6 +433,57 @@ router.post('/:id([0-9a-fA-F]{24})/send-voice', protect, upload.single('audio'),
   }
 })
 
+// ── POST /api/groups/:id/send-image — Group image message ─────
+router.post('/:id([0-9a-fA-F]{24})/send-image', protect, upload.single('image'), async (req, res) => {
+  try {
+    const rawGroup = await Group.findById(req.params.id)
+    if (!rawGroup) return res.status(404).json({ message: 'Group not found.' })
+
+    if (!isMember(rawGroup, req.user._id)) {
+      return res.status(403).json({ message: 'Not a member.' })
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ message: 'No image file provided.' })
+    }
+
+    const base64Image = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`
+    const uploadResult = await cloudinary.uploader.upload(base64Image, {
+      resource_type: 'image',
+      folder: 'connectx/image-messages',
+    })
+
+    const message = await GroupMessage.create({
+      groupId: req.params.id,
+      senderId: req.user._id,
+      text: '',
+      messageType: 'image',
+      imageUrl: uploadResult.secure_url,
+    })
+
+    const msgData = {
+      _id: message._id,
+      groupId: req.params.id,
+      senderId: { _id: req.user._id, name: req.user.name },
+      text: '',
+      messageType: 'image',
+      imageUrl: message.imageUrl,
+      isEdited: false,
+      createdAt: message.createdAt,
+    }
+
+    const io = getIO()
+    if (io) {
+      io.to(`group_${req.params.id}`).emit('receive_group_message', msgData)
+    }
+
+    res.status(201).json(message)
+  } catch (err) {
+    console.error('Group send image message error:', err.message)
+    res.status(500).json({ message: 'Failed to send image.' })
+  }
+})
+
 router.post('/:id([0-9a-fA-F]{24})/invite', protect, async (req, res) => {
   try {
     const { targetUserId } = req.body

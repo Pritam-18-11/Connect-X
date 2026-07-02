@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import AppLayout from '../components/AppLayout'
 import api from '../utils/api'
@@ -9,35 +9,28 @@ import {
   Users, UserPlus, LogOut, Shield, Crown,
   MessageSquare, ChevronLeft, Clock, Search, UserMinus,
   Pencil, Trash2, MoreHorizontal, Mic, Square, Play, Pause, Trash,
+  ImageIcon, ZoomIn,
 } from 'lucide-react'
 
 // ── Date helpers ────────────────────────────────────────────────
 function getDateLabel(dateStr) {
   const date = new Date(dateStr)
   const now = new Date()
-
   const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate())
   const dayDiff = (startOfDay(now) - startOfDay(date)) / (1000 * 60 * 60 * 24)
-
   if (dayDiff === 0) return 'Today'
   if (dayDiff === 1) return 'Yesterday'
-
   const sameYear = date.getFullYear() === now.getFullYear()
   return date.toLocaleDateString('en-US', {
-    day: 'numeric',
-    month: 'short',
-    year: sameYear ? undefined : 'numeric',
+    day: 'numeric', month: 'short', year: sameYear ? undefined : 'numeric',
   })
 }
 
 function isSameDay(d1, d2) {
-  const a = new Date(d1)
-  const b = new Date(d2)
-  return (
-    a.getFullYear() === b.getFullYear() &&
+  const a = new Date(d1), b = new Date(d2)
+  return a.getFullYear() === b.getFullYear() &&
     a.getMonth() === b.getMonth() &&
     a.getDate() === b.getDate()
-  )
 }
 
 function DateSeparator({ label }) {
@@ -78,7 +71,47 @@ function HighlightedText({ text, keyword }) {
   )
 }
 
-// ── Voice Message Bubble — playback ──────────────────────────────
+// ── Image Lightbox ────────────────────────────────────────────
+function ImageLightbox({ src, onClose }) {
+  return (
+    <div
+      className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <button onClick={onClose} className="absolute top-4 right-4 text-white hover:text-gray-300">
+        <X className="w-6 h-6" />
+      </button>
+      <img
+        src={src}
+        alt="Full size"
+        className="max-w-full max-h-full object-contain rounded-lg"
+        onClick={(e) => e.stopPropagation()}
+      />
+    </div>
+  )
+}
+
+// ── Image Bubble ──────────────────────────────────────────────
+function ImageBubble({ src }) {
+  const [lightbox, setLightbox] = useState(false)
+  return (
+    <>
+      <div className="relative cursor-pointer group/img" onClick={() => setLightbox(true)}>
+        <img
+          src={src}
+          alt="Image message"
+          className="max-w-[220px] max-h-[220px] rounded-lg object-cover border border-white/10"
+        />
+        <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/20 rounded-lg transition-all flex items-center justify-center">
+          <ZoomIn className="w-6 h-6 text-white opacity-0 group-hover/img:opacity-100 transition-opacity" />
+        </div>
+      </div>
+      {lightbox && <ImageLightbox src={src} onClose={() => setLightbox(false)} />}
+    </>
+  )
+}
+
+// ── Voice Message Bubble ──────────────────────────────────────
 function VoiceBubble({ msg, isMe }) {
   const audioRef = useRef(null)
   const [playing, setPlaying] = useState(false)
@@ -87,11 +120,7 @@ function VoiceBubble({ msg, isMe }) {
 
   const togglePlay = () => {
     if (!audioRef.current) return
-    if (playing) {
-      audioRef.current.pause()
-    } else {
-      audioRef.current.play()
-    }
+    playing ? audioRef.current.pause() : audioRef.current.play()
   }
 
   useEffect(() => {
@@ -101,12 +130,10 @@ function VoiceBubble({ msg, isMe }) {
     const onEnded = () => { setPlaying(false); setCurrentTime(0) }
     const onPlay = () => setPlaying(true)
     const onPause = () => setPlaying(false)
-
     audio.addEventListener('timeupdate', onTimeUpdate)
     audio.addEventListener('ended', onEnded)
     audio.addEventListener('play', onPlay)
     audio.addEventListener('pause', onPause)
-
     return () => {
       audio.removeEventListener('timeupdate', onTimeUpdate)
       audio.removeEventListener('ended', onEnded)
@@ -145,8 +172,8 @@ function VoiceBubble({ msg, isMe }) {
   )
 }
 
-// ── Message Action Menu — fixed-position, viewport-clamped ─────
-function MessageActionMenu({ isMe, isVoice, canCreatorDelete, onEdit, onDeleteMe, onDeleteEveryone, onClose, anchorRect }) {
+// ── Message Action Menu ───────────────────────────────────────
+function MessageActionMenu({ isMe, isVoice, isImage, canCreatorDelete, onEdit, onDeleteMe, onDeleteEveryone, onClose, anchorRect }) {
   const menuRef = useRef(null)
   const [style, setStyle] = useState({ top: 0, left: 0, visibility: 'hidden' })
 
@@ -155,16 +182,10 @@ function MessageActionMenu({ isMe, isVoice, canCreatorDelete, onEdit, onDeleteMe
     const menuWidth = menuRef.current.offsetWidth || 192
     const menuHeight = menuRef.current.offsetHeight || 120
     const gap = 6
-
-    let left = isMe
-      ? anchorRect.left - menuWidth - gap
-      : anchorRect.right + gap
-
+    let left = isMe ? anchorRect.left - menuWidth - gap : anchorRect.right + gap
     left = Math.max(8, Math.min(left, window.innerWidth - menuWidth - 8))
-
     let top = anchorRect.top
     top = Math.max(8, Math.min(top, window.innerHeight - menuHeight - 8))
-
     setStyle({ top, left, visibility: 'visible' })
   }, [anchorRect, isMe])
 
@@ -175,7 +196,7 @@ function MessageActionMenu({ isMe, isVoice, canCreatorDelete, onEdit, onDeleteMe
       className="z-50 w-48 panel border border-border py-1 shadow-modal"
       onClick={(e) => e.stopPropagation()}
     >
-      {isMe && !isVoice && (
+      {isMe && !isVoice && !isImage && (
         <button
           onClick={() => { onEdit(); onClose() }}
           className="w-full flex items-center gap-2.5 px-3 py-2 text-text-dim hover:text-text hover:bg-void text-xs font-mono transition-colors"
@@ -211,12 +232,11 @@ function GroupMsg({
   const isMe = senderId === currentUserId
   const senderName = msg.senderId?.name || 'Unknown'
   const isVoice = msg.messageType === 'voice'
+  const isImage = msg.messageType === 'image'
   const [showMenu, setShowMenu] = useState(false)
   const [anchorRect, setAnchorRect] = useState(null)
   const triggerRef = useRef(null)
   const isEditing = editingId === msg._id
-
-  // Creator can delete-for-everyone on others' messages too
   const canCreatorDelete = isCurrentUserCreator && !isMe
 
   const openMenu = (e) => {
@@ -230,13 +250,13 @@ function GroupMsg({
     <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-3 group`}>
       <div className={`relative max-w-xs lg:max-w-sm ${!isMe ? 'space-y-1' : ''}`}>
         {!isMe && <p className="text-accent text-xs font-mono px-1">{senderName}</p>}
-        <div className={`px-4 py-2.5 rounded-lg text-sm font-mono leading-relaxed ${
+        <div className={`${isImage ? 'p-1' : 'px-4 py-2.5'} rounded-lg text-sm font-mono leading-relaxed ${
           isMe
             ? 'bg-accent text-void rounded-br-sm'
             : 'bg-panel border border-border text-text rounded-bl-sm'
         }`}>
           {isEditing ? (
-            <div className="space-y-2">
+            <div className="space-y-2 px-3 py-1">
               <input
                 value={editText}
                 onChange={(e) => setEditText(e.target.value)}
@@ -251,6 +271,13 @@ function GroupMsg({
                 <button onClick={onCancelEdit} className={`text-xs opacity-80 hover:opacity-100 ${isMe ? 'text-void' : 'text-text-dim'}`}>Cancel</button>
                 <button onClick={onSaveEdit} className={`text-xs font-semibold hover:underline ${isMe ? 'text-void' : 'text-text'}`}>Save</button>
               </div>
+            </div>
+          ) : isImage ? (
+            <div>
+              <ImageBubble src={msg.imageUrl} />
+              <p className={`text-xs mt-1 px-1 pb-1 text-right ${isMe ? 'text-void/60' : 'text-text-dim'}`}>
+                {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </p>
             </div>
           ) : isVoice ? (
             <>
@@ -283,6 +310,7 @@ function GroupMsg({
           <MessageActionMenu
             isMe={isMe}
             isVoice={isVoice}
+            isImage={isImage}
             canCreatorDelete={canCreatorDelete}
             anchorRect={anchorRect}
             onEdit={() => onEdit(msg)}
@@ -296,14 +324,14 @@ function GroupMsg({
   )
 }
 
-// ── "Deleted by creator" notice — shown ONLY to the original sender ──
+// ── "Deleted by creator" notice ───────────────────────────────
 function DeletedByCreatorNotice({ msg, currentUserId }) {
   const senderId = msg.senderId?._id?.toString() || msg.senderId?.toString()
   const isMe = senderId === currentUserId
   return (
     <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-3`}>
       <div className="max-w-xs lg:max-w-sm px-4 py-2.5 rounded-lg text-xs font-mono italic text-text-dim border border-dashed border-border bg-panel/40">
-        This message is deleted by {msg._deletedByCreatorName}
+        This message was deleted by {msg._deletedByCreatorName}
       </div>
     </div>
   )
@@ -348,9 +376,11 @@ function SearchResultCard({ msg, searchTab, keyword, onClick }) {
       <p className="text-text text-xs font-mono leading-relaxed line-clamp-2">
         {msg.messageType === 'voice'
           ? '🎤 Voice message'
+          : msg.messageType === 'image'
+          ? '🖼️ Image'
           : searchTab === 'keyword'
-            ? <HighlightedText text={msg.text} keyword={keyword} />
-            : msg.text}
+          ? <HighlightedText text={msg.text} keyword={keyword} />
+          : msg.text}
       </p>
     </div>
   )
@@ -377,7 +407,6 @@ export default function GroupChat() {
   const [leavingGroup, setLeavingGroup] = useState(false)
   const [removingMember, setRemovingMember] = useState(null)
 
-  // Member detail states
   const [selectedMember, setSelectedMember] = useState(null)
   const [memberStatus, setMemberStatus] = useState(null)
   const [memberStatusLoading, setMemberStatusLoading] = useState(false)
@@ -388,7 +417,7 @@ export default function GroupChat() {
   const [editingId, setEditingId] = useState(null)
   const [editText, setEditText] = useState('')
 
-  // Voice recording state
+  // Voice state
   const [isRecording, setIsRecording] = useState(false)
   const [recordedBlob, setRecordedBlob] = useState(null)
   const [recordedUrl, setRecordedUrl] = useState(null)
@@ -399,7 +428,13 @@ export default function GroupChat() {
   const recordTimerRef = useRef(null)
   const recordStartRef = useRef(null)
 
-  // Search states
+  // Image state
+  const [selectedImage, setSelectedImage] = useState(null)
+  const [imagePreviewUrl, setImagePreviewUrl] = useState(null)
+  const [sendingImage, setSendingImage] = useState(false)
+  const imageInputRef = useRef(null)
+
+  // Search state
   const [showSearch, setShowSearch] = useState(false)
   const [searchTab, setSearchTab] = useState('keyword')
   const [keyword, setKeyword] = useState('')
@@ -413,12 +448,9 @@ export default function GroupChat() {
 
   const bottomRef = useRef(null)
   const messageRefs = useRef({})
-
   const currentUserId = String(user?.id || user?._id || '')
 
-  useEffect(() => {
-    fetchData()
-  }, [groupId])
+  useEffect(() => { fetchData() }, [groupId])
 
   const fetchData = async () => {
     try {
@@ -443,7 +475,6 @@ export default function GroupChat() {
       const msgGroupId = typeof msg.groupId === 'object'
         ? msg.groupId?._id?.toString()
         : msg.groupId?.toString()
-
       if (msgGroupId === groupId?.toString()) {
         setMessages((prev) => [...prev, msg])
       }
@@ -456,15 +487,11 @@ export default function GroupChat() {
     }
 
     const handleEdited = ({ messageId, text }) => {
-      setMessages((prev) =>
-        prev.map((m) => (m._id === messageId ? { ...m, text } : m))
-      )
+      setMessages((prev) => prev.map((m) => (m._id === messageId ? { ...m, text } : m)))
     }
-
     const handleDeleted = ({ messageId }) => {
       setMessages((prev) => prev.filter((m) => m._id !== messageId))
     }
-
     const handleDeletedByCreator = ({ messageId, creatorName }) => {
       setMessages((prev) =>
         prev.map((m) =>
@@ -474,7 +501,6 @@ export default function GroupChat() {
         )
       )
     }
-
     const handleDeletedForMe = ({ messageId }) => {
       setMessages((prev) => prev.filter((m) => m._id !== messageId))
     }
@@ -507,25 +533,22 @@ export default function GroupChat() {
     setInput('')
   }
 
-  // ── Voice Recording ───────────────────────────────────────────
+  // ── Voice handlers ────────────────────────────────────────────
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const mediaRecorder = new MediaRecorder(stream)
       mediaRecorderRef.current = mediaRecorder
       recordedChunksRef.current = []
-
       mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) recordedChunksRef.current.push(e.data)
       }
-
       mediaRecorder.onstop = () => {
         const blob = new Blob(recordedChunksRef.current, { type: 'audio/webm' })
         setRecordedBlob(blob)
         setRecordedUrl(URL.createObjectURL(blob))
         stream.getTracks().forEach((track) => track.stop())
       }
-
       mediaRecorder.start()
       setIsRecording(true)
       recordStartRef.current = Date.now()
@@ -561,11 +584,9 @@ export default function GroupChat() {
       const formData = new FormData()
       formData.append('audio', recordedBlob, 'voice-message.webm')
       formData.append('duration', recordDuration)
-
       const { data } = await api.post(`/groups/${groupId}/send-voice`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
-
       setMessages((prev) => [...prev, {
         ...data,
         senderId: { _id: currentUserId, name: user?.name },
@@ -579,24 +600,60 @@ export default function GroupChat() {
     }
   }
 
+  // ── Image handlers ────────────────────────────────────────────
+  const handleImageSelect = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith('image/')) { alert('Please select an image file.'); return }
+    setSelectedImage(file)
+    setImagePreviewUrl(URL.createObjectURL(file))
+  }
+
+  const cancelSelectedImage = () => {
+    setSelectedImage(null)
+    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl)
+    setImagePreviewUrl(null)
+    if (imageInputRef.current) imageInputRef.current.value = ''
+  }
+
+  const sendImageMessage = async () => {
+    if (!selectedImage) return
+    setSendingImage(true)
+    try {
+      const formData = new FormData()
+      formData.append('image', selectedImage)
+      const { data } = await api.post(`/groups/${groupId}/send-image`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      setMessages((prev) => [...prev, {
+        ...data,
+        senderId: { _id: currentUserId, name: user?.name },
+      }])
+      cancelSelectedImage()
+    } catch (err) {
+      console.error('Send image error:', err)
+      alert(err.response?.data?.message || 'Failed to send image.')
+    } finally {
+      setSendingImage(false)
+    }
+  }
+
   useEffect(() => {
     return () => {
       clearInterval(recordTimerRef.current)
       if (recordedUrl) URL.revokeObjectURL(recordedUrl)
+      if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl)
     }
   }, [])
 
-  // ── Edit / Delete handlers ─────────────────────────────────
+  // ── Edit / Delete handlers ────────────────────────────────────
   const startEdit = (msg) => {
-    if (msg.messageType === 'voice') return
+    if (msg.messageType !== 'text') return
     setEditingId(msg._id)
     setEditText(msg.text)
   }
 
-  const cancelEdit = () => {
-    setEditingId(null)
-    setEditText('')
-  }
+  const cancelEdit = () => { setEditingId(null); setEditText('') }
 
   const saveEdit = () => {
     if (!editText.trim() || !editingId || !socket) return
@@ -660,7 +717,6 @@ export default function GroupChat() {
     }
   }
 
-  // ── Remove Member Logic ───────────────────────────────────────
   const handleRemoveMember = async (memberId) => {
     setRemovingMember(memberId)
     setRequestError('')
@@ -686,7 +742,6 @@ export default function GroupChat() {
     }
   }
 
-  // ── Member Detail Logic ───────────────────────────────────────
   const handleMemberClick = async (member) => {
     const memberId = member._id?.toString()
     if (memberId === currentUserId) return
@@ -829,7 +884,7 @@ export default function GroupChat() {
     )
   }
 
-  // ── Search Logic ──────────────────────────────────────────────
+  // ── Search ────────────────────────────────────────────────────
   const handleSearch = async () => {
     setSearchLoading(true)
     setSearchResults([])
@@ -859,12 +914,9 @@ export default function GroupChat() {
   const handleResultClick = (messageId) => {
     setShowSearch(false)
     setHighlightedMessageId(messageId)
-
     setTimeout(() => {
       const el = messageRefs.current[messageId]
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      }
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
       setTimeout(() => setHighlightedMessageId(null), 3000)
     }, 150)
   }
@@ -928,16 +980,13 @@ export default function GroupChat() {
             <p className="text-text-dim text-xs font-mono">{group?.members?.length} members</p>
           </div>
 
-          {/* Search icon */}
           <button
             onClick={() => { setShowSearch((v) => !v); resetSearch() }}
             className={`p-2 rounded transition-colors ${showSearch ? 'bg-accent-glow text-accent' : 'hover:bg-void text-text-dim hover:text-text'}`}
-            title="Search messages"
           >
             <Search className="w-4 h-4" />
           </button>
 
-          {/* Menu */}
           <div className="relative">
             <button onClick={() => setShowMenu((v) => !v)}
               className="p-2 rounded hover:bg-void text-text-dim hover:text-text transition-colors">
@@ -984,33 +1033,23 @@ export default function GroupChat() {
             </div>
           )}
           {messages.map((msg, idx) => {
-            const showSeparator =
-              idx === 0 || !isSameDay(msg.createdAt, messages[idx - 1].createdAt)
-
+            const showSeparator = idx === 0 || !isSameDay(msg.createdAt, messages[idx - 1].createdAt)
             if (msg._deletedByCreator) {
               return (
                 <div key={msg._id} ref={(el) => { if (el) messageRefs.current[msg._id] = el }}>
                   {showSeparator && <DateSeparator label={getDateLabel(msg.createdAt)} />}
-                  <DeletedByCreatorNotice
-                    msg={{ ...msg, _deletedByCreatorName: msg._deletedByCreatorName }}
-                    currentUserId={currentUserId}
-                  />
+                  <DeletedByCreatorNotice msg={msg} currentUserId={currentUserId} />
                 </div>
               )
             }
             return (
-              <div
-                key={msg._id}
-                ref={(el) => { if (el) messageRefs.current[msg._id] = el }}
-              >
+              <div key={msg._id} ref={(el) => { if (el) messageRefs.current[msg._id] = el }}>
                 {showSeparator && <DateSeparator label={getDateLabel(msg.createdAt)} />}
-                <div
-                  className={`rounded-lg transition-all duration-500 ${
-                    highlightedMessageId === msg._id
-                      ? 'outline outline-2 outline-accent/60 bg-accent/5 shadow-glow-sm'
-                      : ''
-                  }`}
-                >
+                <div className={`rounded-lg transition-all duration-500 ${
+                  highlightedMessageId === msg._id
+                    ? 'outline outline-2 outline-accent/60 bg-accent/5 shadow-glow-sm'
+                    : ''
+                }`}>
                   <GroupMsg
                     msg={msg}
                     currentUserId={currentUserId}
@@ -1033,13 +1072,36 @@ export default function GroupChat() {
 
         {/* Input */}
         <div className="shrink-0 border-t border-border px-6 py-4 bg-panel">
-          {recordedBlob ? (
-            // ── Recorded voice preview before sending ──
-            <div className="flex items-center gap-3">
+
+          {/* Image preview */}
+          {selectedImage && (
+            <div className="flex items-center gap-3 mb-3">
+              <div className="relative">
+                <img src={imagePreviewUrl} alt="Preview" className="w-20 h-20 object-cover rounded-lg border border-border" />
+                <button onClick={cancelSelectedImage} className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-danger text-white flex items-center justify-center">
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+              <div className="flex-1 text-text-dim text-xs font-mono">
+                <p>{selectedImage.name}</p>
+                <p>{(selectedImage.size / 1024).toFixed(1)} KB</p>
+              </div>
               <button
-                onClick={cancelRecordedVoice}
-                className="w-10 h-10 rounded-full flex items-center justify-center text-danger hover:bg-danger/10 transition-colors shrink-0"
+                onClick={sendImageMessage}
+                disabled={sendingImage}
+                className="w-11 h-11 rounded bg-accent flex items-center justify-center text-void hover:bg-accent-dim transition-colors disabled:opacity-40 shrink-0 shadow-glow-sm"
               >
+                {sendingImage
+                  ? <div className="w-4 h-4 border-2 border-void border-t-transparent rounded-full animate-spin" />
+                  : <Send className="w-4 h-4" />}
+              </button>
+            </div>
+          )}
+
+          {/* Voice recorded preview */}
+          {recordedBlob && !selectedImage ? (
+            <div className="flex items-center gap-3">
+              <button onClick={cancelRecordedVoice} className="w-10 h-10 rounded-full flex items-center justify-center text-danger hover:bg-danger/10 transition-colors shrink-0">
                 <Trash className="w-4 h-4" />
               </button>
               <div className="flex-1 flex items-center gap-3 bg-void border border-border rounded-lg px-4 py-2.5">
@@ -1056,12 +1118,8 @@ export default function GroupChat() {
               </button>
             </div>
           ) : isRecording ? (
-            // ── Recording in progress ──
             <div className="flex items-center gap-3">
-              <button
-                onClick={stopRecording}
-                className="w-11 h-11 rounded-full bg-danger flex items-center justify-center text-white shrink-0 animate-pulse"
-              >
+              <button onClick={stopRecording} className="w-11 h-11 rounded-full bg-danger flex items-center justify-center text-white shrink-0 animate-pulse">
                 <Square className="w-4 h-4 fill-current" />
               </button>
               <div className="flex-1 flex items-center gap-2 text-danger font-mono text-sm">
@@ -1069,9 +1127,17 @@ export default function GroupChat() {
                 Recording... {formatDuration(recordDuration)}
               </div>
             </div>
-          ) : (
-            // ── Default text input + mic button ──
+          ) : !selectedImage ? (
             <form onSubmit={sendMessage} className="flex gap-3 items-center">
+              <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageSelect} />
+              <button
+                type="button"
+                onClick={() => imageInputRef.current?.click()}
+                className="w-10 h-10 rounded flex items-center justify-center text-text-dim hover:text-accent hover:bg-accent/10 transition-colors shrink-0"
+                title="Send image"
+              >
+                <ImageIcon className="w-5 h-5" />
+              </button>
               <input
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -1080,38 +1146,31 @@ export default function GroupChat() {
               />
               {input.trim() ? (
                 <button type="submit"
-                  className="w-11 h-11 rounded bg-accent flex items-center justify-center text-void hover:bg-accent-dim transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0 shadow-glow-sm">
+                  className="w-11 h-11 rounded bg-accent flex items-center justify-center text-void hover:bg-accent-dim transition-colors shrink-0 shadow-glow-sm">
                   <Send className="w-4 h-4" />
                 </button>
               ) : (
-                <button
-                  type="button"
-                  onClick={startRecording}
-                  className="w-11 h-11 rounded bg-accent flex items-center justify-center text-void hover:bg-accent-dim transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0 shadow-glow-sm"
-                >
+                <button type="button" onClick={startRecording}
+                  className="w-11 h-11 rounded bg-accent flex items-center justify-center text-void hover:bg-accent-dim transition-colors shrink-0 shadow-glow-sm">
                   <Mic className="w-4 h-4" />
                 </button>
               )}
             </form>
-          )}
+          ) : null}
         </div>
       </div>
 
-      {/* ── Search Panel (right-side drawer) ── */}
+      {/* Search Panel */}
       {showSearch && (
         <div className="fixed inset-0 z-40 flex pointer-events-none">
-          <div
-            className="flex-1 pointer-events-auto"
-            onClick={() => setShowSearch(false)}
-          />
+          <div className="flex-1 pointer-events-auto" onClick={() => setShowSearch(false)} />
           <div className="w-80 bg-panel border-l border-border flex flex-col h-full shadow-panel pointer-events-auto">
             <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
               <div className="flex items-center gap-2">
                 <Search className="w-4 h-4 text-accent" />
                 <h3 className="text-text font-mono text-sm font-semibold">Search Messages</h3>
               </div>
-              <button onClick={() => setShowSearch(false)}
-                className="text-muted hover:text-text transition-colors">
+              <button onClick={() => setShowSearch(false)} className="text-muted hover:text-text transition-colors">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -1158,7 +1217,6 @@ export default function GroupChat() {
                   </button>
                 </div>
               )}
-
               {searchTab === 'username' && (
                 <div className="space-y-2">
                   <select
@@ -1182,26 +1240,15 @@ export default function GroupChat() {
                   </button>
                 </div>
               )}
-
               {searchTab === 'date' && (
                 <div className="space-y-3">
                   <div>
                     <label className="block text-text-dim text-xs font-mono uppercase tracking-widest mb-1">From</label>
-                    <input
-                      type="date"
-                      value={dateFrom}
-                      onChange={(e) => setDateFrom(e.target.value)}
-                      className="input-field w-full text-sm"
-                    />
+                    <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="input-field w-full text-sm" />
                   </div>
                   <div>
                     <label className="block text-text-dim text-xs font-mono uppercase tracking-widest mb-1">To</label>
-                    <input
-                      type="date"
-                      value={dateTo}
-                      onChange={(e) => setDateTo(e.target.value)}
-                      className="input-field w-full text-sm"
-                    />
+                    <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="input-field w-full text-sm" />
                   </div>
                   <button
                     onClick={handleSearch}
@@ -1220,14 +1267,12 @@ export default function GroupChat() {
                   <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
                 </div>
               )}
-
               {!searchLoading && searchDone && searchResults.length === 0 && (
                 <div className="text-center py-8">
                   <Search className="w-8 h-8 text-muted mx-auto mb-2" />
                   <p className="text-text-dim text-xs font-mono">No messages found.</p>
                 </div>
               )}
-
               {!searchLoading && searchResults.length > 0 && (
                 <>
                   <p className="text-text-dim text-xs font-mono mb-3 px-1">
@@ -1245,7 +1290,6 @@ export default function GroupChat() {
                   ))}
                 </>
               )}
-
               {!searchLoading && !searchDone && (
                 <div className="text-center py-8">
                   <p className="text-text-dim text-xs font-mono opacity-60">
@@ -1296,8 +1340,6 @@ export default function GroupChat() {
                 </div>
               )}
               {renderMemberActionButton()}
-
-              {/* Remove Member button — admins/creator only, not on self, not on creator */}
               {currentUserIsAdmin &&
                 selectedMember._id?.toString() !== currentUserId &&
                 (group?.createdBy?._id?.toString() || group?.createdBy?.toString()) !== selectedMember._id?.toString() && (
@@ -1310,7 +1352,6 @@ export default function GroupChat() {
                     {removingMember === selectedMember._id ? 'Removing...' : 'Remove from Group'}
                   </button>
                 )}
-
               <p className="text-text-dim text-xs font-mono text-center mt-3 opacity-60">
                 Consent required for private messaging
               </p>
@@ -1345,7 +1386,7 @@ export default function GroupChat() {
         </Modal>
       )}
 
-      {/* Invite User Modal */}
+      {/* Invite Modal */}
       {showInviteModal && (
         <Modal onClose={() => setShowInviteModal(false)}>
           <h3 className="text-text font-semibold text-lg mb-4">Invite User</h3>
