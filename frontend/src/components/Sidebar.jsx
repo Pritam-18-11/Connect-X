@@ -68,9 +68,17 @@ export default function Sidebar({ onClose }) {
       {/* ── User Card ──────────────────────────── */}
       <div className="px-4 py-3 border-b border-border">
         <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-void border border-border">
-          <div className="w-8 h-8 rounded-full bg-accent/10 border border-accent/25 flex items-center justify-center font-mono font-bold text-accent text-xs shrink-0">
-            {initials}
-          </div>
+          {user?.avatarUrl ? (
+            <img
+              src={user.avatarUrl}
+              alt={user.name}
+              className="w-8 h-8 rounded-full object-cover border border-accent/25 shrink-0"
+            />
+          ) : (
+            <div className="w-8 h-8 rounded-full bg-accent/10 border border-accent/25 flex items-center justify-center font-mono font-bold text-accent text-xs shrink-0">
+              {initials}
+            </div>
+          )}
           <div className="flex-1 min-w-0">
             <p className="text-text text-sm font-medium truncate leading-tight">
               {user?.name || '...'}

@@ -59,9 +59,17 @@ export default function ChatList() {
                   className="panel p-4 flex items-center gap-4 hover:border-accent/20 transition-all duration-200 border border-transparent cursor-pointer group"
                 >
                   <div className="relative shrink-0">
-                    <div className="w-12 h-12 rounded-full bg-accent/10 border border-accent/25 flex items-center justify-center font-mono font-bold text-accent">
-                      {conn.name?.slice(0, 2).toUpperCase()}
-                    </div>
+                    {conn.avatarUrl ? (
+                      <img
+                        src={conn.avatarUrl}
+                        alt={conn.name}
+                        className="w-12 h-12 rounded-full object-cover border border-accent/25"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 rounded-full bg-accent/10 border border-accent/25 flex items-center justify-center font-mono font-bold text-accent">
+                        {conn.name?.slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
                     {isOnline && (
                       <span className="absolute bottom-0 right-0 w-3 h-3 bg-success rounded-full border-2 border-panel shadow-[0_0_6px_rgba(16,185,129,0.7)]" />
                     )}

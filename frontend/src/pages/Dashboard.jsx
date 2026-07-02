@@ -131,9 +131,17 @@ export default function Dashboard() {
                     className="flex items-center gap-3 p-4 cursor-pointer hover:bg-void/40 transition-colors"
                   >
                     <div className="relative">
-                      <div className="w-9 h-9 rounded-full bg-accent-glow border border-accent/30 flex items-center justify-center font-mono font-bold text-accent text-sm">
-                        {conn.name.slice(0, 2).toUpperCase()}
-                      </div>
+                      {conn.avatarUrl ? (
+                        <img
+                          src={conn.avatarUrl}
+                          alt={conn.name}
+                          className="w-9 h-9 rounded-full object-cover border border-accent/30"
+                        />
+                      ) : (
+                        <div className="w-9 h-9 rounded-full bg-accent-glow border border-accent/30 flex items-center justify-center font-mono font-bold text-accent text-sm">
+                          {conn.name.slice(0, 2).toUpperCase()}
+                        </div>
+                      )}
                       {isOnline && (
                         <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-success rounded-full border-2 border-panel" />
                       )}

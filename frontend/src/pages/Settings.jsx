@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AppLayout from '../components/AppLayout'
 import api from '../utils/api'
 import { useAuth } from '../context/AuthContext'
-import { User, Shield, Bell, Trash2, Save, Check, AlertCircle, X } from 'lucide-react'
+import { User, Shield, Bell, Trash2, Save, Check, AlertCircle, X, Camera, Loader2 } from 'lucide-react'
 
 export default function Settings() {
   const { user, logout } = useAuth()
@@ -18,6 +18,11 @@ export default function Settings() {
   const [error, setError] = useState('')
   const [loadingPrefs, setLoadingPrefs] = useState(true)
 
+  const [avatarUrl, setAvatarUrl] = useState(null)
+  const [uploadingAvatar, setUploadingAvatar] = useState(false)
+  const [avatarError, setAvatarError] = useState('')
+  const avatarInputRef = useRef(null)
+
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deleteConfirmText, setDeleteConfirmText] = useState('')
   const [deleting, setDeleting] = useState(false)
@@ -27,6 +32,7 @@ export default function Settings() {
     if (user) {
       setName(user.name || '')
       setEmail(user.email || '')
+      setAvatarUrl(user.avatarUrl || null)
     }
     fetchLatestPrefs()
   }, [user])
@@ -36,10 +42,57 @@ export default function Settings() {
       const { data } = await api.get('/auth/me')
       setAutoReject(!!data.autoRejectInvites)
       setNotifications(data.notificationsEnabled !== false)
+      setAvatarUrl(data.avatarUrl || null)
     } catch (err) {
       console.error('Failed to fetch preferences:', err)
     } finally {
       setLoadingPrefs(false)
+    }
+  }
+
+  const syncSessionUser = (updatedUser) => {
+    const savedUser = JSON.parse(sessionStorage.getItem('user') || '{}')
+    const merged = { ...savedUser, ...updatedUser }
+    sessionStorage.setItem('user', JSON.stringify(merged))
+  }
+
+  // ── Avatar handlers ───────────────────────────────────────────
+  const handleAvatarSelect = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      setAvatarError('Please select an image file.')
+      return
+    }
+    setAvatarError('')
+    setUploadingAvatar(true)
+    try {
+      const formData = new FormData()
+      formData.append('avatar', file)
+      const { data } = await api.put('/auth/me/avatar', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      setAvatarUrl(data.user.avatarUrl)
+      syncSessionUser({ avatarUrl: data.user.avatarUrl })
+    } catch (err) {
+      setAvatarError(err.response?.data?.message || 'Failed to upload photo.')
+    } finally {
+      setUploadingAvatar(false)
+      if (avatarInputRef.current) avatarInputRef.current.value = ''
+    }
+  }
+
+  const handleRemoveAvatar = async () => {
+    setUploadingAvatar(true)
+    setAvatarError('')
+    try {
+      await api.delete('/auth/me/avatar')
+      setAvatarUrl(null)
+      syncSessionUser({ avatarUrl: null })
+    } catch (err) {
+      setAvatarError(err.response?.data?.message || 'Failed to remove photo.')
+    } finally {
+      setUploadingAvatar(false)
     }
   }
 
@@ -56,16 +109,12 @@ export default function Settings() {
       if (password.trim()) payload.password = password.trim()
 
       const { data } = await api.put('/auth/me', payload)
-
-      const savedUser = JSON.parse(sessionStorage.getItem('user') || '{}')
-      const updatedUser = {
-        ...savedUser,
+      syncSessionUser({
         name: data.user.name,
         email: data.user.email,
         autoRejectInvites: data.user.autoRejectInvites,
         notificationsEnabled: data.user.notificationsEnabled,
-      }
-      sessionStorage.setItem('user', JSON.stringify(updatedUser))
+      })
 
       setPassword('')
       setSaved(true)
@@ -112,12 +161,51 @@ export default function Settings() {
         {/* Profile */}
         <Section icon={User} title="Profile">
           <div className="flex items-center gap-4 mb-6 pb-6 border-b border-border">
-            <div className="w-16 h-16 rounded-full bg-accent/10 border-2 border-accent/25 flex items-center justify-center font-mono font-bold text-accent text-xl shadow-glow-sm">
-              {initials}
+            <div className="relative shrink-0">
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleAvatarSelect}
+              />
+              {avatarUrl ? (
+                <img
+                  src={avatarUrl}
+                  alt={name}
+                  className="w-16 h-16 rounded-full object-cover border-2 border-accent/25 shadow-glow-sm"
+                />
+              ) : (
+                <div className="w-16 h-16 rounded-full bg-accent/10 border-2 border-accent/25 flex items-center justify-center font-mono font-bold text-accent text-xl shadow-glow-sm">
+                  {initials}
+                </div>
+              )}
+              <button
+                onClick={() => avatarInputRef.current?.click()}
+                disabled={uploadingAvatar}
+                className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-accent flex items-center justify-center text-void hover:bg-accent-dim transition-colors disabled:opacity-60"
+                title="Change photo"
+              >
+                {uploadingAvatar
+                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  : <Camera className="w-3.5 h-3.5" />}
+              </button>
             </div>
-            <div>
+            <div className="flex-1">
               <p className="text-text font-medium">{name || 'Loading...'}</p>
               <p className="text-text-dim text-xs font-mono">{email}</p>
+              {avatarUrl && (
+                <button
+                  onClick={handleRemoveAvatar}
+                  disabled={uploadingAvatar}
+                  className="text-danger text-xs font-mono mt-1 hover:underline disabled:opacity-60"
+                >
+                  Remove photo
+                </button>
+              )}
+              {avatarError && (
+                <p className="text-danger text-xs font-mono mt-1">{avatarError}</p>
+              )}
             </div>
           </div>
           <div className="space-y-4">

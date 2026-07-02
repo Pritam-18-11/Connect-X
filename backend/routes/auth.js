@@ -1,5 +1,6 @@
 const express = require('express')
 const jwt = require('jsonwebtoken')
+const multer = require('multer')
 const User = require('../models/User')
 const Connection = require('../models/Connection')
 const ConnectionRequest = require('../models/ConnectionRequest')
@@ -15,8 +16,13 @@ const PrivateChatRequest = require('../models/PrivateChatRequest')
 const InviteCode = require('../models/InviteCode')
 const { protect } = require('../middleware/auth')
 const { authLimiter } = require('../middleware/rateLimiter')
+const cloudinary = require('../utils/cloudinary')
 
 const router = express.Router()
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+})
 
 // Helper: generate JWT token
 const generateToken = (id) => {
@@ -80,6 +86,7 @@ router.post('/login', authLimiter, async (req, res) => {
         name: user.name,
         email: user.email,
         createdAt: user.createdAt,
+        avatarUrl: user.avatarUrl,
         autoRejectInvites: user.autoRejectInvites,
         notificationsEnabled: user.notificationsEnabled,
       },
@@ -97,6 +104,7 @@ router.get('/me', protect, async (req, res) => {
     name: req.user.name,
     email: req.user.email,
     createdAt: req.user.createdAt,
+    avatarUrl: req.user.avatarUrl,
     autoRejectInvites: req.user.autoRejectInvites,
     notificationsEnabled: req.user.notificationsEnabled,
   })
@@ -152,6 +160,7 @@ router.put('/me', protect, async (req, res) => {
         name: user.name,
         email: user.email,
         createdAt: user.createdAt,
+        avatarUrl: user.avatarUrl,
         autoRejectInvites: user.autoRejectInvites,
         notificationsEnabled: user.notificationsEnabled,
       },
@@ -159,6 +168,55 @@ router.put('/me', protect, async (req, res) => {
   } catch (error) {
     console.error('Update profile error:', error.message)
     res.status(500).json({ message: 'Failed to update profile.' })
+  }
+})
+
+// ─── PUT /api/auth/me/avatar — Upload/update profile photo ────
+router.put('/me/avatar', protect, upload.single('avatar'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: 'No image file provided.' })
+    }
+
+    const base64Image = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`
+    const uploadResult = await cloudinary.uploader.upload(base64Image, {
+      resource_type: 'image',
+      folder: 'connectx/avatars',
+      transformation: [{ width: 400, height: 400, crop: 'fill', gravity: 'face' }],
+    })
+
+    const user = await User.findById(req.user._id)
+    user.avatarUrl = uploadResult.secure_url
+    await user.save()
+
+    res.json({
+      success: true,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        createdAt: user.createdAt,
+        avatarUrl: user.avatarUrl,
+        autoRejectInvites: user.autoRejectInvites,
+        notificationsEnabled: user.notificationsEnabled,
+      },
+    })
+  } catch (error) {
+    console.error('Avatar upload error:', error.message)
+    res.status(500).json({ message: 'Failed to upload profile photo.' })
+  }
+})
+
+// ─── DELETE /api/auth/me/avatar — Remove profile photo ─────────
+router.delete('/me/avatar', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id)
+    user.avatarUrl = null
+    await user.save()
+    res.json({ success: true })
+  } catch (error) {
+    console.error('Remove avatar error:', error.message)
+    res.status(500).json({ message: 'Failed to remove profile photo.' })
   }
 })
 

@@ -48,7 +48,6 @@ router.post('/request', protect, async (req, res) => {
     invite.isUsed = true
     await invite.save()
 
-    // Receiver-এর preference check করো — auto-reject অন থাকলে সাথে সাথেই reject
     const receiver = await User.findById(receiverId)
     if (receiver?.autoRejectInvites) {
       const request = await ConnectionRequest.create({
@@ -84,7 +83,7 @@ router.get('/requests', protect, async (req, res) => {
     const requests = await ConnectionRequest.find({
       receiverId: req.user._id,
       status: 'pending',
-    }).populate('senderId', 'name email')
+    }).populate('senderId', 'name email avatarUrl')
 
     const validRequests = requests.filter((r) => r.senderId)
 
@@ -148,8 +147,8 @@ router.get('/list', protect, async (req, res) => {
       isActive: true,
       isRevoked: false,
     })
-      .populate('user1', 'name email')
-      .populate('user2', 'name email')
+      .populate('user1', 'name email avatarUrl')
+      .populate('user2', 'name email avatarUrl')
 
     const connectedUsers = connections
       .filter((conn) => conn.user1 && conn.user2)
@@ -163,6 +162,7 @@ router.get('/list', protect, async (req, res) => {
           userId: other._id,
           name: other.name,
           email: other.email,
+          avatarUrl: other.avatarUrl,
           connectedAt: conn.createdAt,
         }
       })
