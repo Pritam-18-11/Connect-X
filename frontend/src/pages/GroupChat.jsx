@@ -249,7 +249,14 @@ function GroupMsg({
   return (
     <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-3 group`}>
       <div className={`relative max-w-xs lg:max-w-sm ${!isMe ? 'space-y-1' : ''}`}>
-        {!isMe && <p className="text-accent text-xs font-mono px-1">{senderName}</p>}
+        {!isMe && (
+          <div className="flex items-center gap-1.5 px-1">
+            {msg.senderId?.avatarUrl ? (
+              <img src={msg.senderId.avatarUrl} alt={senderName} className="w-4 h-4 rounded-full object-cover" />
+            ) : null}
+            <p className="text-accent text-xs font-mono">{senderName}</p>
+          </div>
+        )}
         <div className={`${isImage ? 'p-1' : 'px-4 py-2.5'} rounded-lg text-sm font-mono leading-relaxed ${
           isMe
             ? 'bg-accent text-void rounded-br-sm'
@@ -589,7 +596,7 @@ export default function GroupChat() {
       })
       setMessages((prev) => [...prev, {
         ...data,
-        senderId: { _id: currentUserId, name: user?.name },
+        senderId: { _id: currentUserId, name: user?.name, avatarUrl: user?.avatarUrl },
       }])
       cancelRecordedVoice()
     } catch (err) {
@@ -627,7 +634,7 @@ export default function GroupChat() {
       })
       setMessages((prev) => [...prev, {
         ...data,
-        senderId: { _id: currentUserId, name: user?.name },
+        senderId: { _id: currentUserId, name: user?.name, avatarUrl: user?.avatarUrl },
       }])
       cancelSelectedImage()
     } catch (err) {
@@ -1316,9 +1323,17 @@ export default function GroupChat() {
                 <ChevronLeft className="w-3.5 h-3.5" /> Back to members
               </button>
               <div className="text-center mb-5">
-                <div className="w-14 h-14 rounded-full bg-accent-glow border border-accent/30 flex items-center justify-center font-mono font-bold text-accent text-xl mx-auto mb-3">
-                  {selectedMember.name?.slice(0, 2).toUpperCase()}
-                </div>
+                {selectedMember.avatarUrl ? (
+                  <img
+                    src={selectedMember.avatarUrl}
+                    alt={selectedMember.name}
+                    className="w-14 h-14 rounded-full object-cover border border-accent/30 mx-auto mb-3"
+                  />
+                ) : (
+                  <div className="w-14 h-14 rounded-full bg-accent-glow border border-accent/30 flex items-center justify-center font-mono font-bold text-accent text-xl mx-auto mb-3">
+                    {selectedMember.name?.slice(0, 2).toUpperCase()}
+                  </div>
+                )}
                 <p className="text-text font-semibold text-lg">{selectedMember.name}</p>
                 <div className="flex items-center justify-center gap-2 mt-1">
                   {(group?.createdBy?._id?.toString() || group?.createdBy?.toString()) === selectedMember._id?.toString() && (
@@ -1369,9 +1384,17 @@ export default function GroupChat() {
                   return (
                     <div key={mId} onClick={() => !isMe && handleMemberClick(member)}
                       className={`flex items-center gap-3 p-2.5 rounded transition-colors ${isMe ? 'opacity-50' : 'hover:bg-void/60 cursor-pointer'}`}>
-                      <div className="w-8 h-8 rounded-full bg-accent-glow border border-accent/30 flex items-center justify-center font-mono font-bold text-accent text-xs shrink-0">
-                        {member.name?.slice(0, 2).toUpperCase()}
-                      </div>
+                      {member.avatarUrl ? (
+                        <img
+                          src={member.avatarUrl}
+                          alt={member.name}
+                          className="w-8 h-8 rounded-full object-cover shrink-0"
+                        />
+                      ) : (
+                        <div className="w-8 h-8 rounded-full bg-accent-glow border border-accent/30 flex items-center justify-center font-mono font-bold text-accent text-xs shrink-0">
+                          {member.name?.slice(0, 2).toUpperCase()}
+                        </div>
+                      )}
                       <span className="text-text text-sm flex-1">
                         {member.name} {isMe && <span className="text-text-dim text-xs">(you)</span>}
                       </span>
@@ -1398,9 +1421,17 @@ export default function GroupChat() {
             <div className="space-y-2">
               {connections.map((conn) => (
                 <div key={conn.userId} className="flex items-center gap-3 p-2 rounded hover:bg-void/40">
-                  <div className="w-8 h-8 rounded-full bg-accent-glow border border-accent/30 flex items-center justify-center font-mono font-bold text-accent text-xs">
-                    {conn.name.slice(0, 2).toUpperCase()}
-                  </div>
+                  {conn.avatarUrl ? (
+                    <img
+                      src={conn.avatarUrl}
+                      alt={conn.name}
+                      className="w-8 h-8 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-8 h-8 rounded-full bg-accent-glow border border-accent/30 flex items-center justify-center font-mono font-bold text-accent text-xs">
+                      {conn.name.slice(0, 2).toUpperCase()}
+                    </div>
+                  )}
                   <span className="text-text text-sm flex-1">{conn.name}</span>
                   <button onClick={() => handleInvite(conn.userId)} disabled={invitingUser === conn.userId}
                     className="text-xs font-mono text-accent border border-accent/30 px-2 py-1 rounded hover:bg-accent-glow transition-all disabled:opacity-60">

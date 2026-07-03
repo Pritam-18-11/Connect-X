@@ -43,7 +43,6 @@ async function areConnected(userId1, userId2) {
 }
 
 // Removes member/admin IDs that no longer correspond to an existing User.
-// Returns the cleaned group (re-fetched if a cleanup write happened).
 async function pruneDeletedMembers(group) {
   const allIds = [...new Set([...group.members.map((m) => m.toString())])]
   if (allIds.length === 0) return group
@@ -90,7 +89,7 @@ router.post('/', protect, async (req, res) => {
 router.get('/', protect, async (req, res) => {
   try {
     const groups = await Group.find({ members: req.user._id })
-      .populate('createdBy', 'name')
+      .populate('createdBy', 'name avatarUrl')
       .sort({ updatedAt: -1 })
 
     const myGroups = []
@@ -115,7 +114,7 @@ router.get('/my-invitations', protect, async (req, res) => {
       status: 'pending',
     })
       .populate('groupId', 'name description')
-      .populate('invitedBy', 'name')
+      .populate('invitedBy', 'name avatarUrl')
       .sort({ createdAt: -1 })
     res.json(invitations)
   } catch (err) {
@@ -134,11 +133,11 @@ router.get('/pending-admin-tasks', protect, async (req, res) => {
 
     const [joinRequests, adminActionRequests] = await Promise.all([
       GroupJoinRequest.find({ groupId: { $in: adminGroupIds }, status: 'pending' })
-        .populate('requestedBy', 'name')
+        .populate('requestedBy', 'name avatarUrl')
         .populate('groupId', 'name'),
       AdminActionRequest.find({ groupId: { $in: creatorGroupIds }, status: 'pending' })
-        .populate('requestedBy', 'name')
-        .populate('targetUser', 'name')
+        .populate('requestedBy', 'name avatarUrl')
+        .populate('targetUser', 'name avatarUrl')
         .populate('groupId', 'name'),
     ])
 
@@ -152,7 +151,7 @@ router.get('/pending-admin-tasks', protect, async (req, res) => {
 router.get('/join/:code', protect, async (req, res) => {
   try {
     const group = await Group.findOne({ inviteCode: req.params.code })
-      .populate('createdBy', 'name')
+      .populate('createdBy', 'name avatarUrl')
     if (!group) return res.status(404).json({ message: 'Invalid invite code.' })
 
     await pruneDeletedMembers(group)
@@ -344,9 +343,9 @@ router.get('/:id([0-9a-fA-F]{24})', protect, async (req, res) => {
     }
 
     const group = await Group.findById(req.params.id)
-      .populate('createdBy', 'name')
-      .populate('admins', 'name')
-      .populate('members', 'name')
+      .populate('createdBy', 'name avatarUrl')
+      .populate('admins', 'name avatarUrl')
+      .populate('members', 'name avatarUrl')
 
     res.json(group)
   } catch (err) {
@@ -368,7 +367,7 @@ router.get('/:id([0-9a-fA-F]{24})/messages', protect, async (req, res) => {
     }
 
     const messages = await GroupMessage.find({ groupId: req.params.id })
-      .populate('senderId', 'name')
+      .populate('senderId', 'name avatarUrl')
       .sort({ createdAt: 1 })
 
     res.json(messages)
@@ -412,7 +411,7 @@ router.post('/:id([0-9a-fA-F]{24})/send-voice', protect, upload.single('audio'),
     const msgData = {
       _id: message._id,
       groupId: req.params.id,
-      senderId: { _id: req.user._id, name: req.user.name },
+      senderId: { _id: req.user._id, name: req.user.name, avatarUrl: req.user.avatarUrl },
       text: '',
       messageType: 'voice',
       audioUrl: message.audioUrl,
@@ -464,7 +463,7 @@ router.post('/:id([0-9a-fA-F]{24})/send-image', protect, upload.single('image'),
     const msgData = {
       _id: message._id,
       groupId: req.params.id,
-      senderId: { _id: req.user._id, name: req.user.name },
+      senderId: { _id: req.user._id, name: req.user.name, avatarUrl: req.user.avatarUrl },
       text: '',
       messageType: 'image',
       imageUrl: message.imageUrl,
@@ -629,7 +628,6 @@ router.post('/:id([0-9a-fA-F]{24})/leave', protect, async (req, res) => {
   }
 })
 
-// ── GET /api/groups/:groupId/search/keyword ───────────────────
 router.get('/:groupId/search/keyword', protect, async (req, res) => {
   try {
     const { q } = req.query
@@ -650,7 +648,7 @@ router.get('/:groupId/search/keyword', protect, async (req, res) => {
       groupId: req.params.groupId,
       text: { $regex: escaped, $options: 'i' },
     })
-      .populate('senderId', 'name')
+      .populate('senderId', 'name avatarUrl')
       .sort({ createdAt: 1 })
       .limit(100)
 
@@ -661,7 +659,6 @@ router.get('/:groupId/search/keyword', protect, async (req, res) => {
   }
 })
 
-// ── GET /api/groups/:groupId/search/username ──────────────────
 router.get('/:groupId/search/username', protect, async (req, res) => {
   try {
     const { userId } = req.query
@@ -684,7 +681,7 @@ router.get('/:groupId/search/username', protect, async (req, res) => {
       groupId: req.params.groupId,
       senderId: userId,
     })
-      .populate('senderId', 'name')
+      .populate('senderId', 'name avatarUrl')
       .sort({ createdAt: 1 })
       .limit(200)
 
@@ -695,7 +692,6 @@ router.get('/:groupId/search/username', protect, async (req, res) => {
   }
 })
 
-// ── GET /api/groups/:groupId/search/date ─────────────────────
 router.get('/:groupId/search/date', protect, async (req, res) => {
   try {
     const { from, to } = req.query
@@ -723,7 +719,7 @@ router.get('/:groupId/search/date', protect, async (req, res) => {
       groupId: req.params.groupId,
       createdAt: { $gte: fromDate, $lte: toDate },
     })
-      .populate('senderId', 'name')
+      .populate('senderId', 'name avatarUrl')
       .sort({ createdAt: 1 })
       .limit(200)
 

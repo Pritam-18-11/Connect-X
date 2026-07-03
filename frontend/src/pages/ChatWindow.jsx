@@ -70,7 +70,7 @@ function ImageLightbox({ src, onClose }) {
 }
 
 // ── Image Bubble ──────────────────────────────────────────────
-function ImageBubble({ src, isMe }) {
+function ImageBubble({ src }) {
   const [lightbox, setLightbox] = useState(false)
   return (
     <>
@@ -153,7 +153,7 @@ function VoiceBubble({ msg, isMe }) {
   )
 }
 
-// ── Message Action Menu ───────────────────────────────────────
+// ── Action menu ──────────────────────────────────────────────────
 function MessageActionMenu({ isMe, isVoice, isImage, onEdit, onDeleteMe, onDeleteEveryone, onClose, anchorRect }) {
   const menuRef = useRef(null)
   const [style, setStyle] = useState({ top: 0, left: 0, visibility: 'hidden' })
@@ -163,10 +163,16 @@ function MessageActionMenu({ isMe, isVoice, isImage, onEdit, onDeleteMe, onDelet
     const menuWidth = menuRef.current.offsetWidth || 192
     const menuHeight = menuRef.current.offsetHeight || 120
     const gap = 6
-    let left = isMe ? anchorRect.left - menuWidth - gap : anchorRect.right + gap
+
+    let left = isMe
+      ? anchorRect.left - menuWidth - gap
+      : anchorRect.right + gap
+
     left = Math.max(8, Math.min(left, window.innerWidth - menuWidth - 8))
+
     let top = anchorRect.top
     top = Math.max(8, Math.min(top, window.innerHeight - menuHeight - 8))
+
     setStyle({ top, left, visibility: 'visible' })
   }, [anchorRect, isMe])
 
@@ -211,6 +217,7 @@ function Message({
     typeof msg.senderId === 'object'
       ? msg.senderId?._id?.toString()
       : msg.senderId?.toString()
+
   const isMe = senderId === currentUserId
   const isVoice = msg.messageType === 'voice'
   const isImage = msg.messageType === 'image'
@@ -253,7 +260,7 @@ function Message({
             </div>
           ) : isImage ? (
             <div>
-              <ImageBubble src={msg.imageUrl} isMe={isMe} />
+              <ImageBubble src={msg.imageUrl} />
               <div className={`flex items-center justify-end gap-1 mt-1 px-2 pb-1 text-xs ${isMe ? 'text-void/60' : 'text-text-dim'}`}>
                 <span>{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                 {isMe && (msg.seen ? <CheckCheck className="w-3 h-3" /> : <Check className="w-3 h-3" />)}
@@ -330,7 +337,10 @@ function Modal({ children, onClose }) {
         className="panel p-6 w-full max-w-sm border border-border relative"
         onClick={(e) => e.stopPropagation()}
       >
-        <button onClick={onClose} className="absolute top-4 right-4 text-muted hover:text-text transition-colors">
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 text-muted hover:text-text transition-colors"
+        >
           <X className="w-4 h-4" />
         </button>
         {children}
@@ -446,18 +456,33 @@ export default function ChatWindow() {
         clearUnread(otherUserId)
       }
     }
-    const handleSent = (msg) => { setMessages((prev) => [...prev, msg]); setLimitError('') }
-    const handleTyping = ({ senderId }) => { if (senderId === otherUserId) setIsTyping(true) }
-    const handleStopTyping = ({ senderId }) => { if (senderId === otherUserId) setIsTyping(false) }
+    const handleSent = (msg) => {
+      setMessages((prev) => [...prev, msg])
+      setLimitError('')
+    }
+    const handleTyping = ({ senderId }) => {
+      if (senderId === otherUserId) setIsTyping(true)
+    }
+    const handleStopTyping = ({ senderId }) => {
+      if (senderId === otherUserId) setIsTyping(false)
+    }
     const handleSeen = ({ messageId }) => {
-      setMessages((prev) => prev.map((m) => (m._id === messageId ? { ...m, seen: true } : m)))
+      setMessages((prev) =>
+        prev.map((m) => (m._id === messageId ? { ...m, seen: true } : m))
+      )
     }
     const handleRevoked = ({ by }) => {
-      if (by === otherUserId) { alert('This connection has been revoked.'); navigate('/dashboard') }
+      if (by === otherUserId) {
+        alert('This connection has been revoked.')
+        navigate('/dashboard')
+      }
     }
     const handleLimitReached = ({ message }) => setLimitError(message)
+
     const handleEdited = ({ messageId, text }) => {
-      setMessages((prev) => prev.map((m) => (m._id === messageId ? { ...m, text } : m)))
+      setMessages((prev) =>
+        prev.map((m) => (m._id === messageId ? { ...m, text } : m))
+      )
     }
     const handleDeleted = ({ messageId }) => {
       setMessages((prev) => prev.filter((m) => m._id !== messageId))
@@ -562,6 +587,7 @@ export default function ChatWindow() {
       mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) recordedChunksRef.current.push(e.data)
       }
+
       mediaRecorder.onstop = () => {
         const blob = new Blob(recordedChunksRef.current, { type: 'audio/webm' })
         setRecordedBlob(blob)
@@ -628,14 +654,17 @@ export default function ChatWindow() {
     }
   }, [])
 
-  // ── Edit / Delete ─────────────────────────────────────────────
+  // ── Edit / Delete handlers ─────────────────────────────────
   const startEdit = (msg) => {
     if (msg.messageType !== 'text') return
     setEditingId(msg._id)
     setEditText(msg.text)
   }
 
-  const cancelEdit = () => { setEditingId(null); setEditText('') }
+  const cancelEdit = () => {
+    setEditingId(null)
+    setEditText('')
+  }
 
   const saveEdit = async () => {
     if (!editText.trim() || !editingId) return
@@ -761,9 +790,17 @@ export default function ChatWindow() {
         {/* Header */}
         <div className="shrink-0 border-b border-border px-6 py-4 flex items-center gap-4 bg-panel">
           <div className="relative">
-            <div className="w-10 h-10 rounded-full bg-accent-glow border border-accent/30 flex items-center justify-center font-mono font-bold text-accent text-sm">
-              {otherUser?.name.slice(0, 2).toUpperCase()}
-            </div>
+            {otherUser?.avatarUrl ? (
+              <img
+                src={otherUser.avatarUrl}
+                alt={otherUser.name}
+                className="w-10 h-10 rounded-full object-cover border border-accent/30"
+              />
+            ) : (
+              <div className="w-10 h-10 rounded-full bg-accent-glow border border-accent/30 flex items-center justify-center font-mono font-bold text-accent text-sm">
+                {otherUser?.name.slice(0, 2).toUpperCase()}
+              </div>
+            )}
             {isOnline && !isBlocked && (
               <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-success rounded-full border-2 border-panel" />
             )}
@@ -772,11 +809,19 @@ export default function ChatWindow() {
             <div className="flex items-center gap-2">
               <p className="text-text font-medium text-sm">{otherUser?.name}</p>
               {isBlocked && (
-                <span className="tag text-xs text-danger border-danger/30 bg-danger/10">Blocked</span>
+                <span className="tag text-xs text-danger border-danger/30 bg-danger/10">
+                  Blocked
+                </span>
               )}
             </div>
             <p className="text-text-dim text-xs font-mono">
-              {isBlocked ? 'You blocked this user' : blockedByThem ? 'You are blocked' : isOnline ? 'Online' : 'Offline'}
+              {isBlocked
+                ? 'You blocked this user'
+                : blockedByThem
+                ? 'You are blocked'
+                : isOnline
+                ? 'Online'
+                : 'Offline'}
               {currentLimit && !isBlocked && (
                 <span className="ml-2 text-warn">· Limit: {currentLimit.dailyLimit}/day</span>
               )}
@@ -835,17 +880,25 @@ export default function ChatWindow() {
         {(isBlocked || blockedByThem) && (
           <div className="shrink-0 mx-6 mt-4 flex items-center gap-2 bg-danger/10 border border-danger/30 text-danger rounded px-4 py-2.5 font-mono text-xs">
             <Ban className="w-4 h-4 shrink-0" />
-            {isBlocked ? 'You have blocked this user. Unblock to send messages.' : 'You cannot send messages to this user.'}
+            {isBlocked
+              ? 'You have blocked this user. Unblock to send messages.'
+              : 'You cannot send messages to this user.'}
           </div>
         )}
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-6 py-4" onClick={() => setShowMenu(false)}>
+        <div
+          className="flex-1 overflow-y-auto px-6 py-4"
+          onClick={() => setShowMenu(false)}
+        >
           {messages.length === 0 && (
-            <div className="text-center text-text-dim font-mono text-sm mt-8">No messages yet. Say hello!</div>
+            <div className="text-center text-text-dim font-mono text-sm mt-8">
+              No messages yet. Say hello!
+            </div>
           )}
           {messages.map((msg, idx) => {
-            const showSeparator = idx === 0 || !isSameDay(msg.createdAt, messages[idx - 1].createdAt)
+            const showSeparator =
+              idx === 0 || !isSameDay(msg.createdAt, messages[idx - 1].createdAt)
             return (
               <div key={msg._id}>
                 {showSeparator && <DateSeparator label={getDateLabel(msg.createdAt)} />}
@@ -868,7 +921,7 @@ export default function ChatWindow() {
           <div ref={bottomRef} />
         </div>
 
-        {/* Limit error */}
+        {/* Limit error bar */}
         {limitError && (
           <div className="shrink-0 mx-6 mb-2 flex items-center gap-2 bg-warn/10 border border-warn/30 text-warn rounded px-4 py-2.5 font-mono text-xs">
             <AlertCircle className="w-4 h-4 shrink-0" />
@@ -876,7 +929,7 @@ export default function ChatWindow() {
           </div>
         )}
 
-        {/* Input Area */}
+        {/* Input */}
         <div className="shrink-0 border-t border-border px-6 py-4 bg-panel">
 
           {/* Image preview before send */}
@@ -914,7 +967,10 @@ export default function ChatWindow() {
           {/* Voice recorded preview */}
           {recordedBlob && !selectedImage ? (
             <div className="flex items-center gap-3">
-              <button onClick={cancelRecordedVoice} className="w-10 h-10 rounded-full flex items-center justify-center text-danger hover:bg-danger/10 transition-colors shrink-0">
+              <button
+                onClick={cancelRecordedVoice}
+                className="w-10 h-10 rounded-full flex items-center justify-center text-danger hover:bg-danger/10 transition-colors shrink-0"
+              >
                 <Trash className="w-4 h-4" />
               </button>
               <div className="flex-1 flex items-center gap-3 bg-void border border-border rounded-lg px-4 py-2.5">
@@ -932,7 +988,10 @@ export default function ChatWindow() {
             </div>
           ) : isRecording ? (
             <div className="flex items-center gap-3">
-              <button onClick={stopRecording} className="w-11 h-11 rounded-full bg-danger flex items-center justify-center text-white shrink-0 animate-pulse">
+              <button
+                onClick={stopRecording}
+                className="w-11 h-11 rounded-full bg-danger flex items-center justify-center text-white shrink-0 animate-pulse"
+              >
                 <Square className="w-4 h-4 fill-current" />
               </button>
               <div className="flex-1 flex items-center gap-2 text-danger font-mono text-sm">
@@ -942,7 +1001,6 @@ export default function ChatWindow() {
             </div>
           ) : !selectedImage ? (
             <form onSubmit={sendMessage} className="flex gap-3 items-center">
-              {/* Hidden image input */}
               <input
                 ref={imageInputRef}
                 type="file"
@@ -950,7 +1008,6 @@ export default function ChatWindow() {
                 className="hidden"
                 onChange={handleImageSelect}
               />
-              {/* Image button */}
               <button
                 type="button"
                 onClick={() => canSend && imageInputRef.current?.click()}
@@ -1002,13 +1059,21 @@ export default function ChatWindow() {
                 Blocking will stop all messages. Do you also want to permanently revoke this connection?
               </p>
               <div className="space-y-3">
-                <button onClick={handleBlock} className="w-full py-3 rounded border border-warn/40 bg-warn/10 text-warn font-mono text-sm hover:bg-warn/20 transition-all">
+                <button
+                  onClick={handleBlock}
+                  className="w-full py-3 rounded border border-warn/40 bg-warn/10 text-warn font-mono text-sm hover:bg-warn/20 transition-all"
+                >
                   Block Only (keep connection)
                 </button>
-                <button onClick={() => setBlockPhase('confirm-revoke')} className="w-full py-3 rounded border border-danger/40 bg-danger/10 text-danger font-mono text-sm hover:bg-danger/20 transition-all">
+                <button
+                  onClick={() => setBlockPhase('confirm-revoke')}
+                  className="w-full py-3 rounded border border-danger/40 bg-danger/10 text-danger font-mono text-sm hover:bg-danger/20 transition-all"
+                >
                   Block + Revoke Connection
                 </button>
-                <button onClick={() => setShowBlockModal(false)} className="btn-ghost w-full">Cancel</button>
+                <button onClick={() => setShowBlockModal(false)} className="btn-ghost w-full">
+                  Cancel
+                </button>
               </div>
             </div>
           )}
@@ -1017,11 +1082,18 @@ export default function ChatWindow() {
               <AlertTriangle className="w-10 h-10 text-danger mx-auto mb-4" />
               <h3 className="text-text font-semibold text-lg mb-2">Are you sure?</h3>
               <p className="text-text-dim text-sm font-mono mb-6 leading-relaxed">
-                This will permanently revoke the connection with <span className="text-accent">{otherUser?.name}</span>.
+                This will permanently revoke the connection with{' '}
+                <span className="text-accent">{otherUser?.name}</span>.
               </p>
               <div className="flex gap-3">
-                <button onClick={() => setBlockPhase('choose')} className="btn-ghost flex-1">Go Back</button>
-                <button onClick={handleRevoke} disabled={revoking} className="btn-danger flex-1 disabled:opacity-60">
+                <button onClick={() => setBlockPhase('choose')} className="btn-ghost flex-1">
+                  Go Back
+                </button>
+                <button
+                  onClick={handleRevoke}
+                  disabled={revoking}
+                  className="btn-danger flex-1 disabled:opacity-60"
+                >
                   {revoking ? 'Revoking...' : 'Yes, Revoke'}
                 </button>
               </div>
@@ -1037,11 +1109,18 @@ export default function ChatWindow() {
             <AlertTriangle className="w-10 h-10 text-danger mx-auto mb-4" />
             <h3 className="text-text font-semibold text-lg mb-2">Are you sure?</h3>
             <p className="text-text-dim text-sm font-mono mb-6 leading-relaxed">
-              This will permanently remove your connection with <span className="text-accent">{otherUser?.name}</span>.
+              This will permanently remove your connection with{' '}
+              <span className="text-accent">{otherUser?.name}</span>.
             </p>
             <div className="flex gap-3">
-              <button onClick={() => setShowRevokeModal(false)} className="btn-ghost flex-1">Cancel</button>
-              <button onClick={handleRevoke} disabled={revoking} className="btn-danger flex-1 disabled:opacity-60">
+              <button onClick={() => setShowRevokeModal(false)} className="btn-ghost flex-1">
+                Cancel
+              </button>
+              <button
+                onClick={handleRevoke}
+                disabled={revoking}
+                className="btn-danger flex-1 disabled:opacity-60"
+              >
                 {revoking ? 'Revoking...' : 'Revoke'}
               </button>
             </div>
@@ -1054,7 +1133,8 @@ export default function ChatWindow() {
         <Modal onClose={() => setShowLimitModal(false)}>
           <h3 className="text-text font-semibold text-lg mb-1">Set Daily Message Limit</h3>
           <p className="text-text-dim text-sm font-mono mb-2">
-            Limit how many messages <span className="text-accent">{otherUser?.name}</span> can send per day.
+            Limit how many messages{' '}
+            <span className="text-accent">{otherUser?.name}</span> can send per day.
           </p>
           {currentLimit && (
             <p className="text-warn text-xs font-mono mb-4">
@@ -1086,7 +1166,11 @@ export default function ChatWindow() {
           >
             Remove Limit
           </button>
-          <button onClick={handleSaveLimit} disabled={limitLoading} className="btn-primary w-full disabled:opacity-60">
+          <button
+            onClick={handleSaveLimit}
+            disabled={limitLoading}
+            className="btn-primary w-full disabled:opacity-60"
+          >
             {limitLoading ? 'Saving...' : 'Save Limit'}
           </button>
         </Modal>
@@ -1096,7 +1180,9 @@ export default function ChatWindow() {
       {showTimedModal && (
         <Modal onClose={() => setShowTimedModal(false)}>
           <h3 className="text-text font-semibold text-lg mb-1">Timed Connection</h3>
-          <p className="text-text-dim text-sm font-mono mb-6">Set an expiry for this connection</p>
+          <p className="text-text-dim text-sm font-mono mb-6">
+            Set an expiry for this connection
+          </p>
           <div className="grid grid-cols-3 gap-2 mb-6">
             {[7, 15, 30, 60, 90, null].map((days) => (
               <button
@@ -1112,7 +1198,9 @@ export default function ChatWindow() {
               </button>
             ))}
           </div>
-          <button onClick={() => setShowTimedModal(false)} className="btn-primary w-full">Apply</button>
+          <button onClick={() => setShowTimedModal(false)} className="btn-primary w-full">
+            Apply
+          </button>
         </Modal>
       )}
     </AppLayout>
