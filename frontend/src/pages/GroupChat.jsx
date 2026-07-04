@@ -10,7 +10,7 @@ import {
   Users, UserPlus, LogOut, Shield, Crown,
   MessageSquare, ChevronLeft, Clock, Search, UserMinus,
   Pencil, Trash2, MoreHorizontal, Mic, Square, Play, Pause, Trash,
-  ImageIcon, ZoomIn,
+  ImageIcon, ZoomIn, Sparkles,
 } from 'lucide-react'
 
 // ── Date helpers ────────────────────────────────────────────────
@@ -421,6 +421,10 @@ export default function GroupChat() {
   const [processingRequest, setProcessingRequest] = useState(false)
   const [requestError, setRequestError] = useState('')
 
+  // Mutual connections state
+  const [mutualConnections, setMutualConnections] = useState(null)
+  const [mutualLoading, setMutualLoading] = useState(false)
+
   // Edit state
   const [editingId, setEditingId] = useState(null)
   const [editText, setEditText] = useState('')
@@ -442,6 +446,14 @@ export default function GroupChat() {
   const [imagePreviewUrl, setImagePreviewUrl] = useState(null)
   const [sendingImage, setSendingImage] = useState(false)
   const imageInputRef = useRef(null)
+
+  // AI Summary state
+  const [aiSummaryEnabled, setAiSummaryEnabled] = useState(false)
+  const [updatingAiSetting, setUpdatingAiSetting] = useState(false)
+  const [showSummaryModal, setShowSummaryModal] = useState(false)
+  const [summaryText, setSummaryText] = useState('')
+  const [summaryLoading, setSummaryLoading] = useState(false)
+  const [summaryError, setSummaryError] = useState('')
 
   // Search state
   const [showSearch, setShowSearch] = useState(false)
@@ -468,6 +480,7 @@ export default function GroupChat() {
         api.get(`/groups/${groupId}/messages`),
       ])
       setGroup(groupRes.data)
+      setAiSummaryEnabled(!!groupRes.data.aiSummaryEnabled)
       setMessages(messagesRes.data)
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to load group.')
@@ -540,6 +553,36 @@ export default function GroupChat() {
     if (!input.trim() || !socket) return
     socket.emit('group_send_message', { groupId, text: input.trim() })
     setInput('')
+  }
+
+  // ── AI Summary handlers ────────────────────────────────────────
+  const handleSummarize = async () => {
+    setShowSummaryModal(true)
+    setSummaryLoading(true)
+    setSummaryError('')
+    setSummaryText('')
+    try {
+      const { data } = await api.post(`/groups/${groupId}/summarize`)
+      setSummaryText(data.summary)
+    } catch (err) {
+      setSummaryError(err.response?.data?.message || 'Failed to generate summary.')
+    } finally {
+      setSummaryLoading(false)
+    }
+  }
+
+  const toggleAiSummary = async () => {
+    setUpdatingAiSetting(true)
+    try {
+      const { data } = await api.put(`/groups/${groupId}/settings`, {
+        aiSummaryEnabled: !aiSummaryEnabled,
+      })
+      setAiSummaryEnabled(data.aiSummaryEnabled)
+    } catch (err) {
+      console.error('Toggle AI summary error:', err)
+    } finally {
+      setUpdatingAiSetting(false)
+    }
   }
 
   // ── Voice handlers ────────────────────────────────────────────
@@ -765,20 +808,28 @@ export default function GroupChat() {
     }
   }
 
+  // ── Member Detail Logic ─────────────────────────────────────────
   const handleMemberClick = async (member) => {
     const memberId = member._id?.toString()
     if (memberId === currentUserId) return
     setSelectedMember(member)
     setMemberStatus(null)
+    setMutualConnections(null)
     setMemberStatusLoading(true)
+    setMutualLoading(true)
     setRequestError('')
     try {
-      const { data } = await api.get(`/private-chat/status/${memberId}`)
-      setMemberStatus(data)
+      const [statusRes, mutualRes] = await Promise.all([
+        api.get(`/private-chat/status/${memberId}`),
+        api.get(`/private-chat/mutual/${memberId}`),
+      ])
+      setMemberStatus(statusRes.data)
+      setMutualConnections(mutualRes.data)
     } catch (err) {
       console.error('Failed to fetch status:', err)
     } finally {
       setMemberStatusLoading(false)
+      setMutualLoading(false)
     }
   }
 
@@ -1016,7 +1067,7 @@ export default function GroupChat() {
               <MoreVertical className="w-4 h-4" />
             </button>
             {showMenu && (
-              <div className="absolute top-10 right-0 w-52 panel border border-border z-20 py-1">
+              <div className="absolute top-10 right-0 w-56 panel border border-border z-20 py-1">
                 <button onClick={() => { copyLink(); setShowMenu(false) }}
                   className="w-full flex items-center gap-3 px-4 py-2.5 text-text-dim hover:text-text hover:bg-void text-sm font-mono transition-colors">
                   {copiedLink ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
@@ -1026,6 +1077,20 @@ export default function GroupChat() {
                   className="w-full flex items-center gap-3 px-4 py-2.5 text-text-dim hover:text-text hover:bg-void text-sm font-mono transition-colors">
                   <Users className="w-4 h-4" /> Members
                 </button>
+                {aiSummaryEnabled && (
+                  <button onClick={() => { handleSummarize(); setShowMenu(false) }}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-text-dim hover:text-text hover:bg-void text-sm font-mono transition-colors">
+                    <Sparkles className="w-4 h-4" /> Summarize Chat
+                  </button>
+                )}
+                {currentUserIsCreator && (
+                  <button onClick={() => { toggleAiSummary(); setShowMenu(false) }}
+                    disabled={updatingAiSetting}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-text-dim hover:text-text hover:bg-void text-sm font-mono transition-colors disabled:opacity-60">
+                    <Sparkles className="w-4 h-4" />
+                    {updatingAiSetting ? 'Updating...' : aiSummaryEnabled ? 'Disable AI Summary' : 'Enable AI Summary'}
+                  </button>
+                )}
                 {currentUserIsAdmin && (
                   <button onClick={openInviteModal}
                     className="w-full flex items-center gap-3 px-4 py-2.5 text-text-dim hover:text-text hover:bg-void text-sm font-mono transition-colors">
@@ -1191,6 +1256,27 @@ export default function GroupChat() {
         />
       )}
 
+      {/* AI Summary Modal */}
+      {showSummaryModal && (
+        <Modal onClose={() => setShowSummaryModal(false)}>
+          <h3 className="text-text font-semibold text-lg mb-1 flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-accent" /> Chat Summary
+          </h3>
+          <p className="text-text-dim text-xs font-mono mb-4">Last 50 messages summarized by AI</p>
+          {summaryLoading ? (
+            <div className="flex justify-center py-8">
+              <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : summaryError ? (
+            <p className="text-danger text-sm font-mono text-center py-4">{summaryError}</p>
+          ) : (
+            <div className="text-text text-sm font-mono leading-relaxed whitespace-pre-line max-h-96 overflow-y-auto">
+              {summaryText}
+            </div>
+          )}
+        </Modal>
+      )}
+
       {/* Search Panel */}
       {showSearch && (
         <div className="fixed inset-0 z-40 flex pointer-events-none">
@@ -1337,11 +1423,11 @@ export default function GroupChat() {
 
       {/* Members Modal */}
       {showMembersModal && (
-        <Modal onClose={() => { setShowMembersModal(false); setSelectedMember(null); setMemberStatus(null) }}>
+        <Modal onClose={() => { setShowMembersModal(false); setSelectedMember(null); setMemberStatus(null); setMutualConnections(null) }}>
           {selectedMember ? (
             <div>
               <button
-                onClick={() => { setSelectedMember(null); setMemberStatus(null); setRequestError('') }}
+                onClick={() => { setSelectedMember(null); setMemberStatus(null); setMutualConnections(null); setRequestError('') }}
                 className="flex items-center gap-1 text-text-dim text-xs font-mono mb-4 hover:text-text transition-colors"
               >
                 <ChevronLeft className="w-3.5 h-3.5" /> Back to members
@@ -1373,6 +1459,39 @@ export default function GroupChat() {
                     )}
                 </div>
               </div>
+
+              {/* Mutual Connections */}
+              {mutualLoading ? (
+                <div className="flex justify-center py-3 mb-2">
+                  <div className="w-5 h-5 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : mutualConnections && mutualConnections.count > 0 ? (
+                <div className="mb-4 p-3 rounded-lg bg-accent/5 border border-accent/15">
+                  <p className="text-accent text-xs font-mono font-semibold mb-2 flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5" />
+                    {mutualConnections.count} Mutual Connection{mutualConnections.count !== 1 ? 's' : ''}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {mutualConnections.users.map((u) => (
+                      <div key={u._id} className="flex items-center gap-1.5 bg-void rounded-full pl-1 pr-2.5 py-1">
+                        {u.avatarUrl ? (
+                          <img src={u.avatarUrl} alt={u.name} className="w-5 h-5 rounded-full object-cover" />
+                        ) : (
+                          <div className="w-5 h-5 rounded-full bg-accent-glow flex items-center justify-center text-[9px] font-bold text-accent">
+                            {u.name?.slice(0, 1).toUpperCase()}
+                          </div>
+                        )}
+                        <span className="text-text text-xs font-mono">{u.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : mutualConnections ? (
+                <p className="text-text-dim text-xs font-mono text-center mb-4 opacity-60">
+                  No mutual connections
+                </p>
+              ) : null}
+
               {requestError && (
                 <div className="bg-danger/10 border border-danger/30 text-danger rounded px-3 py-2 mb-3 font-mono text-xs text-center">
                   {requestError}

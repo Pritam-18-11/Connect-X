@@ -11,6 +11,7 @@ const User = require('../models/User')
 const { protect } = require('../middleware/auth')
 const { getIO } = require('../socket/socketManager')
 const cloudinary = require('../utils/cloudinary')
+const { summarizeMessages } = require('../utils/aiClient')
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } })
 
@@ -480,6 +481,67 @@ router.post('/:id([0-9a-fA-F]{24})/send-image', protect, upload.single('image'),
   } catch (err) {
     console.error('Group send image message error:', err.message)
     res.status(500).json({ message: 'Failed to send image.' })
+  }
+})
+
+// ── PUT /api/groups/:id/settings — Toggle AI summary (creator only) ─
+router.put('/:id([0-9a-fA-F]{24})/settings', protect, async (req, res) => {
+  try {
+    const { aiSummaryEnabled } = req.body
+    const group = await Group.findById(req.params.id)
+    if (!group) return res.status(404).json({ message: 'Group not found.' })
+
+    if (!isCreator(group, req.user._id)) {
+      return res.status(403).json({ message: 'Only the group creator can change this setting.' })
+    }
+
+    if (typeof aiSummaryEnabled === 'boolean') {
+      group.aiSummaryEnabled = aiSummaryEnabled
+    }
+    await group.save()
+
+    res.json({ success: true, aiSummaryEnabled: group.aiSummaryEnabled })
+  } catch (err) {
+    console.error('Update group settings error:', err.message)
+    res.status(500).json({ message: 'Failed to update settings.' })
+  }
+})
+
+// ── POST /api/groups/:id/summarize — AI summary of last 50 messages ─
+router.post('/:id([0-9a-fA-F]{24})/summarize', protect, async (req, res) => {
+  try {
+    const group = await Group.findById(req.params.id)
+    if (!group) return res.status(404).json({ message: 'Group not found.' })
+
+    if (!isMember(group, req.user._id)) {
+      return res.status(403).json({ message: 'Not a member.' })
+    }
+
+    if (!group.aiSummaryEnabled) {
+      return res.status(403).json({ message: 'AI summarization is disabled for this group.' })
+    }
+
+    const messages = await GroupMessage.find({ groupId: req.params.id, messageType: 'text' })
+      .populate('senderId', 'name')
+      .sort({ createdAt: -1 })
+      .limit(50)
+
+    if (messages.length === 0) {
+      return res.status(400).json({ message: 'No text messages to summarize.' })
+    }
+
+    const chronological = messages.reverse()
+    const formatted = chronological.map((m) => ({
+      senderName: m.senderId?.name || 'Unknown',
+      text: m.text,
+    }))
+
+    const summary = await summarizeMessages(formatted)
+
+    res.json({ summary, messageCount: chronological.length })
+  } catch (err) {
+    console.error('Summarize error:', err.message)
+    res.status(500).json({ message: 'Failed to generate summary.' })
   }
 })
 
