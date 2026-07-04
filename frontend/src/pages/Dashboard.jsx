@@ -4,6 +4,7 @@ import AppLayout from '../components/AppLayout'
 import { useAuth } from '../context/AuthContext'
 import { useSocket } from '../context/SocketContext'
 import api from '../utils/api'
+import AvatarViewerModal from '../components/AvatarViewerModal'
 import {
   QrCode, KeyRound, UserCheck, MessageSquare,
   Shield, Clock, Zap, Users,
@@ -25,6 +26,7 @@ export default function Dashboard() {
   const [requests, setRequests] = useState([])
   const [messagesToday, setMessagesToday] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [viewerAvatar, setViewerAvatar] = useState(null)
 
   useEffect(() => {
     const fetchData = async () => {
@@ -53,6 +55,12 @@ export default function Dashboard() {
     { label: 'Timed Connections', value: '0', icon: Clock, color: 'text-accent' },
   ]
 
+  const openAvatarViewer = (e, conn) => {
+    if (!conn.avatarUrl) return
+    e.stopPropagation()
+    setViewerAvatar({ src: conn.avatarUrl, name: conn.name })
+  }
+
   return (
     <AppLayout>
       <div className="p-8 max-w-5xl">
@@ -66,14 +74,12 @@ export default function Dashboard() {
           </p>
         </div>
 
-        {/* Revoke success message */}
         {location.state?.revokedSuccess && (
           <div className="mb-6 flex items-center gap-2 bg-success/10 border border-success/30 text-success rounded px-4 py-3 font-mono text-sm">
             Connection Revoked Successfully
           </div>
         )}
 
-        {/* Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           {stats.map(({ label, value, icon: Icon, color }) => (
             <div key={label} className="panel p-5">
@@ -84,7 +90,6 @@ export default function Dashboard() {
           ))}
         </div>
 
-        {/* Quick actions */}
         <div className="mb-8">
           <h2 className="text-text text-sm font-mono uppercase tracking-widest mb-4 flex items-center gap-2">
             <span className="w-4 h-px bg-accent" /> Quick Actions
@@ -106,7 +111,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* My Connections */}
         <div className="mb-8">
           <h2 className="text-text text-sm font-mono uppercase tracking-widest mb-4 flex items-center gap-2">
             <span className="w-4 h-px bg-success" /> My Connections
@@ -130,7 +134,7 @@ export default function Dashboard() {
                     onClick={() => navigate(`/chat/${conn.userId}`)}
                     className="flex items-center gap-3 p-4 cursor-pointer hover:bg-void/40 transition-colors"
                   >
-                    <div className="relative">
+                    <div className="relative" onClick={(e) => openAvatarViewer(e, conn)}>
                       {conn.avatarUrl ? (
                         <img
                           src={conn.avatarUrl}
@@ -160,7 +164,6 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Privacy notice */}
         <div className="panel p-5 border border-accent/10 bg-accent-glow/30">
           <div className="flex items-start gap-3">
             <Shield className="w-5 h-5 text-accent shrink-0 mt-0.5" />
@@ -175,6 +178,14 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {viewerAvatar && (
+        <AvatarViewerModal
+          src={viewerAvatar.src}
+          name={viewerAvatar.name}
+          onClose={() => setViewerAvatar(null)}
+        />
+      )}
     </AppLayout>
   )
 }

@@ -182,7 +182,7 @@ router.put('/me/avatar', protect, upload.single('avatar'), async (req, res) => {
     const uploadResult = await cloudinary.uploader.upload(base64Image, {
       resource_type: 'image',
       folder: 'connectx/avatars',
-      transformation: [{ width: 400, height: 400, crop: 'fill', gravity: 'face' }],
+      transformation: [{ width: 400, height: 400, crop: 'limit' }],
     })
 
     const user = await User.findById(req.user._id)

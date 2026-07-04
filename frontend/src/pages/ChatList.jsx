@@ -3,11 +3,13 @@ import { Link } from 'react-router-dom'
 import AppLayout from '../components/AppLayout'
 import api from '../utils/api'
 import { useSocket } from '../context/SocketContext'
+import AvatarViewerModal from '../components/AvatarViewerModal'
 import { MessageSquare, ShieldOff } from 'lucide-react'
 
 export default function ChatList() {
   const [connections, setConnections] = useState([])
   const [loading, setLoading] = useState(true)
+  const [viewerAvatar, setViewerAvatar] = useState(null)
   const { onlineUsers, unreadChats } = useSocket()
 
   useEffect(() => {
@@ -23,6 +25,13 @@ export default function ChatList() {
     }
     fetchConnections()
   }, [])
+
+  const openAvatarViewer = (e, conn) => {
+    if (!conn.avatarUrl) return
+    e.preventDefault()
+    e.stopPropagation()
+    setViewerAvatar({ src: conn.avatarUrl, name: conn.name })
+  }
 
   return (
     <AppLayout>
@@ -58,7 +67,7 @@ export default function ChatList() {
                   to={`/chat/${conn.userId}`}
                   className="panel p-4 flex items-center gap-4 hover:border-accent/20 transition-all duration-200 border border-transparent cursor-pointer group"
                 >
-                  <div className="relative shrink-0">
+                  <div className="relative shrink-0" onClick={(e) => openAvatarViewer(e, conn)}>
                     {conn.avatarUrl ? (
                       <img
                         src={conn.avatarUrl}
@@ -82,7 +91,6 @@ export default function ChatList() {
                     </p>
                   </div>
 
-                  {/* Unread count badge */}
                   {unreadCount > 0 && (
                     <span className="shrink-0 min-w-[22px] h-[22px] px-1.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)] flex items-center justify-center text-white text-xs font-bold font-mono">
                       {unreadCount > 99 ? '99+' : unreadCount}
@@ -101,6 +109,14 @@ export default function ChatList() {
           </p>
         </div>
       </div>
+
+      {viewerAvatar && (
+        <AvatarViewerModal
+          src={viewerAvatar.src}
+          name={viewerAvatar.name}
+          onClose={() => setViewerAvatar(null)}
+        />
+      )}
     </AppLayout>
   )
 }

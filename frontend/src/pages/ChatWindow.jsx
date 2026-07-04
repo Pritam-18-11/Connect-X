@@ -4,6 +4,7 @@ import AppLayout from '../components/AppLayout'
 import api from '../utils/api'
 import { useAuth } from '../context/AuthContext'
 import { useSocket } from '../context/SocketContext'
+import ImageCropModal from '../components/ImageCropModal'
 import {
   Send, ShieldOff, Settings2, Clock, MoreVertical,
   X, Check, CheckCheck, AlertTriangle, AlertCircle, Ban,
@@ -393,7 +394,8 @@ export default function ChatWindow() {
   const recordStartRef = useRef(null)
 
   // Image state
-  const [selectedImage, setSelectedImage] = useState(null)
+  const [cropSrc, setCropSrc] = useState(null)
+  const [selectedImageBlob, setSelectedImageBlob] = useState(null)
   const [imagePreviewUrl, setImagePreviewUrl] = useState(null)
   const [sendingImage, setSendingImage] = useState(false)
   const imageInputRef = useRef(null)
@@ -542,23 +544,36 @@ export default function ChatWindow() {
       alert('Please select an image file.')
       return
     }
-    setSelectedImage(file)
-    setImagePreviewUrl(URL.createObjectURL(file))
+    setCropSrc(URL.createObjectURL(file))
+  }
+
+  const cancelCrop = () => {
+    if (cropSrc) URL.revokeObjectURL(cropSrc)
+    setCropSrc(null)
+    if (imageInputRef.current) imageInputRef.current.value = ''
+  }
+
+  const confirmCrop = (blob) => {
+    if (cropSrc) URL.revokeObjectURL(cropSrc)
+    setCropSrc(null)
+    setSelectedImageBlob(blob)
+    setImagePreviewUrl(URL.createObjectURL(blob))
   }
 
   const cancelSelectedImage = () => {
-    setSelectedImage(null)
+    setSelectedImageBlob(null)
     if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl)
     setImagePreviewUrl(null)
     if (imageInputRef.current) imageInputRef.current.value = ''
   }
 
   const sendImageMessage = async () => {
-    if (!selectedImage) return
+    if (!selectedImageBlob) return
     setSendingImage(true)
     try {
+      const file = new File([selectedImageBlob], 'image.jpg', { type: 'image/jpeg' })
       const formData = new FormData()
-      formData.append('image', selectedImage)
+      formData.append('image', file)
       formData.append('receiverId', otherUserId)
 
       const { data } = await api.post('/chat/send-image', formData, {
@@ -651,6 +666,7 @@ export default function ChatWindow() {
       clearInterval(recordTimerRef.current)
       if (recordedUrl) URL.revokeObjectURL(recordedUrl)
       if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl)
+      if (cropSrc) URL.revokeObjectURL(cropSrc)
     }
   }, [])
 
@@ -933,7 +949,7 @@ export default function ChatWindow() {
         <div className="shrink-0 border-t border-border px-6 py-4 bg-panel">
 
           {/* Image preview before send */}
-          {selectedImage && (
+          {selectedImageBlob && (
             <div className="flex items-center gap-3 mb-3">
               <div className="relative">
                 <img
@@ -949,8 +965,7 @@ export default function ChatWindow() {
                 </button>
               </div>
               <div className="flex-1 text-text-dim text-xs font-mono">
-                <p>{selectedImage.name}</p>
-                <p>{(selectedImage.size / 1024).toFixed(1)} KB</p>
+                <p>Cropped image ready to send</p>
               </div>
               <button
                 onClick={sendImageMessage}
@@ -965,7 +980,7 @@ export default function ChatWindow() {
           )}
 
           {/* Voice recorded preview */}
-          {recordedBlob && !selectedImage ? (
+          {recordedBlob && !selectedImageBlob ? (
             <div className="flex items-center gap-3">
               <button
                 onClick={cancelRecordedVoice}
@@ -999,7 +1014,7 @@ export default function ChatWindow() {
                 Recording... {formatDuration(recordDuration)}
               </div>
             </div>
-          ) : !selectedImage ? (
+          ) : !selectedImageBlob ? (
             <form onSubmit={sendMessage} className="flex gap-3 items-center">
               <input
                 ref={imageInputRef}
@@ -1047,6 +1062,15 @@ export default function ChatWindow() {
           ) : null}
         </div>
       </div>
+
+      {cropSrc && (
+        <ImageCropModal
+          imageSrc={cropSrc}
+          mode="image"
+          onCancel={cancelCrop}
+          onConfirm={confirmCrop}
+        />
+      )}
 
       {/* Block Modal */}
       {showBlockModal && (

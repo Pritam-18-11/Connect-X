@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import AppLayout from '../components/AppLayout'
 import api from '../utils/api'
 import { useAuth } from '../context/AuthContext'
+import ImageCropModal from '../components/ImageCropModal'
+import AvatarViewerModal from '../components/AvatarViewerModal'
 import { User, Shield, Bell, Trash2, Save, Check, AlertCircle, X, Camera, Loader2 } from 'lucide-react'
 
 export default function Settings() {
@@ -21,6 +23,8 @@ export default function Settings() {
   const [avatarUrl, setAvatarUrl] = useState(null)
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [avatarError, setAvatarError] = useState('')
+  const [cropSrc, setCropSrc] = useState(null)
+  const [showAvatarViewer, setShowAvatarViewer] = useState(false)
   const avatarInputRef = useRef(null)
 
   const [showDeleteModal, setShowDeleteModal] = useState(false)
@@ -57,7 +61,7 @@ export default function Settings() {
   }
 
   // ── Avatar handlers ───────────────────────────────────────────
-  const handleAvatarSelect = async (e) => {
+  const handleAvatarSelect = (e) => {
     const file = e.target.files?.[0]
     if (!file) return
     if (!file.type.startsWith('image/')) {
@@ -65,8 +69,22 @@ export default function Settings() {
       return
     }
     setAvatarError('')
+    setCropSrc(URL.createObjectURL(file))
+  }
+
+  const cancelCrop = () => {
+    if (cropSrc) URL.revokeObjectURL(cropSrc)
+    setCropSrc(null)
+    if (avatarInputRef.current) avatarInputRef.current.value = ''
+  }
+
+  const confirmCrop = async (blob) => {
+    if (cropSrc) URL.revokeObjectURL(cropSrc)
+    setCropSrc(null)
     setUploadingAvatar(true)
+    setAvatarError('')
     try {
+      const file = new File([blob], 'avatar.jpg', { type: 'image/jpeg' })
       const formData = new FormData()
       formData.append('avatar', file)
       const { data } = await api.put('/auth/me/avatar', formData, {
@@ -173,7 +191,8 @@ export default function Settings() {
                 <img
                   src={avatarUrl}
                   alt={name}
-                  className="w-16 h-16 rounded-full object-cover border-2 border-accent/25 shadow-glow-sm"
+                  onClick={() => setShowAvatarViewer(true)}
+                  className="w-16 h-16 rounded-full object-cover border-2 border-accent/25 shadow-glow-sm cursor-pointer"
                 />
               ) : (
                 <div className="w-16 h-16 rounded-full bg-accent/10 border-2 border-accent/25 flex items-center justify-center font-mono font-bold text-accent text-xl shadow-glow-sm">
@@ -277,6 +296,19 @@ export default function Settings() {
           {saved ? 'Saved!' : saving ? 'Saving...' : 'Save Changes'}
         </button>
       </div>
+
+      {cropSrc && (
+        <ImageCropModal
+          imageSrc={cropSrc}
+          mode="avatar"
+          onCancel={cancelCrop}
+          onConfirm={confirmCrop}
+        />
+      )}
+
+      {showAvatarViewer && avatarUrl && (
+        <AvatarViewerModal src={avatarUrl} name={name} onClose={() => setShowAvatarViewer(false)} />
+      )}
 
       {/* Delete Account Modal */}
       {showDeleteModal && (

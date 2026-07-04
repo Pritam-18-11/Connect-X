@@ -2,6 +2,7 @@ require('dotenv').config()
 const express = require('express')
 const cors = require('cors')
 const http = require('http')
+const multer = require('multer')
 const connectDB = require('./config/db')
 const initSocket = require('./socket')
 const socketManager = require('./socket/socketManager')
@@ -25,6 +26,21 @@ app.use('/api/private-chat', require('./routes/privateChat'))
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'PrivaChat backend is running' })
+})
+
+// Multer / upload error handler — catches file-size/type errors from any route
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ message: 'File is too large.' })
+    }
+    return res.status(400).json({ message: err.message })
+  }
+  if (err) {
+    console.error('Unhandled error:', err.message)
+    return res.status(500).json({ message: 'Something went wrong.' })
+  }
+  next()
 })
 
 // Initialize Socket.IO and store io instance for use in routes

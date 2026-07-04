@@ -4,6 +4,7 @@ import AppLayout from '../components/AppLayout'
 import api from '../utils/api'
 import { useAuth } from '../context/AuthContext'
 import { useSocket } from '../context/SocketContext'
+import ImageCropModal from '../components/ImageCropModal'
 import {
   Send, MoreVertical, X, Copy, Check,
   Users, UserPlus, LogOut, Shield, Crown,
@@ -436,7 +437,8 @@ export default function GroupChat() {
   const recordStartRef = useRef(null)
 
   // Image state
-  const [selectedImage, setSelectedImage] = useState(null)
+  const [cropSrc, setCropSrc] = useState(null)
+  const [selectedImageBlob, setSelectedImageBlob] = useState(null)
   const [imagePreviewUrl, setImagePreviewUrl] = useState(null)
   const [sendingImage, setSendingImage] = useState(false)
   const imageInputRef = useRef(null)
@@ -612,23 +614,36 @@ export default function GroupChat() {
     const file = e.target.files?.[0]
     if (!file) return
     if (!file.type.startsWith('image/')) { alert('Please select an image file.'); return }
-    setSelectedImage(file)
-    setImagePreviewUrl(URL.createObjectURL(file))
+    setCropSrc(URL.createObjectURL(file))
+  }
+
+  const cancelCrop = () => {
+    if (cropSrc) URL.revokeObjectURL(cropSrc)
+    setCropSrc(null)
+    if (imageInputRef.current) imageInputRef.current.value = ''
+  }
+
+  const confirmCrop = (blob) => {
+    if (cropSrc) URL.revokeObjectURL(cropSrc)
+    setCropSrc(null)
+    setSelectedImageBlob(blob)
+    setImagePreviewUrl(URL.createObjectURL(blob))
   }
 
   const cancelSelectedImage = () => {
-    setSelectedImage(null)
+    setSelectedImageBlob(null)
     if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl)
     setImagePreviewUrl(null)
     if (imageInputRef.current) imageInputRef.current.value = ''
   }
 
   const sendImageMessage = async () => {
-    if (!selectedImage) return
+    if (!selectedImageBlob) return
     setSendingImage(true)
     try {
+      const file = new File([selectedImageBlob], 'image.jpg', { type: 'image/jpeg' })
       const formData = new FormData()
-      formData.append('image', selectedImage)
+      formData.append('image', file)
       const { data } = await api.post(`/groups/${groupId}/send-image`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
@@ -650,6 +665,7 @@ export default function GroupChat() {
       clearInterval(recordTimerRef.current)
       if (recordedUrl) URL.revokeObjectURL(recordedUrl)
       if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl)
+      if (cropSrc) URL.revokeObjectURL(cropSrc)
     }
   }, [])
 
@@ -1081,7 +1097,7 @@ export default function GroupChat() {
         <div className="shrink-0 border-t border-border px-6 py-4 bg-panel">
 
           {/* Image preview */}
-          {selectedImage && (
+          {selectedImageBlob && (
             <div className="flex items-center gap-3 mb-3">
               <div className="relative">
                 <img src={imagePreviewUrl} alt="Preview" className="w-20 h-20 object-cover rounded-lg border border-border" />
@@ -1090,8 +1106,7 @@ export default function GroupChat() {
                 </button>
               </div>
               <div className="flex-1 text-text-dim text-xs font-mono">
-                <p>{selectedImage.name}</p>
-                <p>{(selectedImage.size / 1024).toFixed(1)} KB</p>
+                <p>Cropped image ready to send</p>
               </div>
               <button
                 onClick={sendImageMessage}
@@ -1106,7 +1121,7 @@ export default function GroupChat() {
           )}
 
           {/* Voice recorded preview */}
-          {recordedBlob && !selectedImage ? (
+          {recordedBlob && !selectedImageBlob ? (
             <div className="flex items-center gap-3">
               <button onClick={cancelRecordedVoice} className="w-10 h-10 rounded-full flex items-center justify-center text-danger hover:bg-danger/10 transition-colors shrink-0">
                 <Trash className="w-4 h-4" />
@@ -1134,7 +1149,7 @@ export default function GroupChat() {
                 Recording... {formatDuration(recordDuration)}
               </div>
             </div>
-          ) : !selectedImage ? (
+          ) : !selectedImageBlob ? (
             <form onSubmit={sendMessage} className="flex gap-3 items-center">
               <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageSelect} />
               <button
@@ -1166,6 +1181,15 @@ export default function GroupChat() {
           ) : null}
         </div>
       </div>
+
+      {cropSrc && (
+        <ImageCropModal
+          imageSrc={cropSrc}
+          mode="image"
+          onCancel={cancelCrop}
+          onConfirm={confirmCrop}
+        />
+      )}
 
       {/* Search Panel */}
       {showSearch && (

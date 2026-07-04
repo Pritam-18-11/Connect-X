@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, QrCode, KeyRound, UserCheck,
@@ -6,6 +7,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
+import AvatarViewerModal from './AvatarViewerModal'
 
 const navItems = [
   { to: '/dashboard',       icon: LayoutDashboard, label: 'Dashboard' },
@@ -22,6 +24,7 @@ export default function Sidebar({ onClose }) {
   const { user, logout } = useAuth()
   const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
+  const [showAvatarViewer, setShowAvatarViewer] = useState(false)
 
   const initials = user?.name
     ? user.name.split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2)
@@ -55,7 +58,6 @@ export default function Sidebar({ onClose }) {
               <p className="text-text-dim text-xs mt-0.5 font-mono opacity-70">consent-first</p>
             </div>
           </div>
-          {/* Close button — mobile only */}
           <button
             onClick={onClose}
             className="md:hidden p-1.5 rounded-lg text-text-dim hover:text-text hover:bg-void transition-colors"
@@ -72,7 +74,8 @@ export default function Sidebar({ onClose }) {
             <img
               src={user.avatarUrl}
               alt={user.name}
-              className="w-8 h-8 rounded-full object-cover border border-accent/25 shrink-0"
+              onClick={() => setShowAvatarViewer(true)}
+              className="w-8 h-8 rounded-full object-cover border border-accent/25 shrink-0 cursor-pointer"
             />
           ) : (
             <div className="w-8 h-8 rounded-full bg-accent/10 border border-accent/25 flex items-center justify-center font-mono font-bold text-accent text-xs shrink-0">
@@ -129,6 +132,10 @@ export default function Sidebar({ onClose }) {
           <span className="text-[15px]">Logout</span>
         </button>
       </div>
+
+      {showAvatarViewer && user?.avatarUrl && (
+        <AvatarViewerModal src={user.avatarUrl} name={user.name} onClose={() => setShowAvatarViewer(false)} />
+      )}
     </aside>
   )
 }
