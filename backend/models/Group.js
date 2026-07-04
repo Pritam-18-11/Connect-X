@@ -24,6 +24,10 @@ const groupSchema = new mongoose.Schema(
       type: String,
       unique: true,
     },
+    aiSummaryEnabled: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: true }
 )

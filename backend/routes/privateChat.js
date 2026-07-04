@@ -3,6 +3,7 @@ const router = express.Router()
 const PrivateChatRequest = require('../models/PrivateChatRequest')
 const Connection = require('../models/Connection')
 const Group = require('../models/Group')
+const User = require('../models/User')
 const { protect } = require('../middleware/auth')
 const { getIO } = require('../socket/socketManager')
 
@@ -24,6 +25,43 @@ async function areConnected(userId1, userId2) {
   return !!conn
 }
 
+// ── GET /api/private-chat/mutual/:userId — Mutual connections ─
+router.get('/mutual/:userId', protect, async (req, res) => {
+  try {
+    const myId = req.user._id.toString()
+    const otherId = req.params.userId
+
+    const myConnections = await Connection.find({
+      $or: [{ user1: myId }, { user2: myId }],
+      isActive: true,
+      isRevoked: false,
+    })
+    const otherConnections = await Connection.find({
+      $or: [{ user1: otherId }, { user2: otherId }],
+      isActive: true,
+      isRevoked: false,
+    })
+
+    const myConnectedIds = new Set(
+      myConnections.map((c) =>
+        c.user1.toString() === myId ? c.user2.toString() : c.user1.toString()
+      )
+    )
+    const otherConnectedIds = otherConnections.map((c) =>
+      c.user1.toString() === otherId ? c.user2.toString() : c.user1.toString()
+    )
+
+    const mutualIds = otherConnectedIds.filter((id) => myConnectedIds.has(id))
+
+    const mutualUsers = await User.find({ _id: { $in: mutualIds } }).select('name avatarUrl')
+
+    res.json({ count: mutualUsers.length, users: mutualUsers })
+  } catch (err) {
+    console.error('Mutual connections error:', err.message)
+    res.status(500).json({ message: 'Failed to fetch mutual connections.' })
+  }
+})
+
 // ── POST /api/private-chat/request ────────────────────────────
 router.post('/request', protect, async (req, res) => {
   try {
@@ -34,19 +72,16 @@ router.post('/request', protect, async (req, res) => {
       return res.status(400).json({ message: 'You cannot request yourself.' })
     }
 
-    // Must share a group
     const shared = await shareGroup(senderId, receiverId)
     if (!shared) {
       return res.status(403).json({ message: 'You must be in the same group to send a private chat request.' })
     }
 
-    // Already connected?
     const connected = await areConnected(senderId, receiverId)
     if (connected) {
       return res.status(400).json({ message: 'You are already connected with this user.' })
     }
 
-    // Check existing pending request
     const existingPending = await PrivateChatRequest.findOne({
       sender: senderId,
       receiver: receiverId,
@@ -57,7 +92,6 @@ router.post('/request', protect, async (req, res) => {
       return res.status(400).json({ message: 'Request already pending.' })
     }
 
-    // 24h cooldown check
     const cooldown = await PrivateChatRequest.findOne({
       sender: senderId,
       receiver: receiverId,
@@ -85,7 +119,6 @@ router.post('/request', protect, async (req, res) => {
       .populate('sender', 'name')
       .populate('groupId', 'name')
 
-    // Notify receiver via socket
     const io = getIO()
     if (io) {
       io.to(receiverId.toString()).emit('private_chat_request', {
@@ -105,7 +138,6 @@ router.post('/request', protect, async (req, res) => {
 // ── GET /api/private-chat/requests — Received pending requests
 router.get('/requests', protect, async (req, res) => {
   try {
-    // Lazy-expire old requests
     await PrivateChatRequest.updateMany(
       { receiver: req.user._id, status: 'pending', expiresAt: { $lt: new Date() } },
       { status: 'expired' }
@@ -133,11 +165,9 @@ router.get('/status/:userId', protect, async (req, res) => {
     const myId = req.user._id
     const otherId = req.params.userId
 
-    // Connected?
     const connected = await areConnected(myId, otherId)
     if (connected) return res.json({ status: 'connected' })
 
-    // Pending sent?
     const sentRequest = await PrivateChatRequest.findOne({
       sender: myId,
       receiver: otherId,
@@ -148,7 +178,6 @@ router.get('/status/:userId', protect, async (req, res) => {
       return res.json({ status: 'request_pending_sent', requestId: sentRequest._id })
     }
 
-    // Pending received?
     const receivedRequest = await PrivateChatRequest.findOne({
       sender: otherId,
       receiver: myId,
@@ -159,7 +188,6 @@ router.get('/status/:userId', protect, async (req, res) => {
       return res.json({ status: 'request_pending_received', requestId: receivedRequest._id })
     }
 
-    // 24h cooldown?
     const cooldown = await PrivateChatRequest.findOne({
       sender: myId,
       receiver: otherId,
@@ -195,13 +223,11 @@ router.post('/approve/:id', protect, async (req, res) => {
     request.status = 'approved'
     await request.save()
 
-    // Create permanent connection (reuse existing Connection model)
     const connection = await Connection.create({
       user1: request.sender,
       user2: request.receiver,
     })
 
-    // Notify sender in real-time
     const io = getIO()
     if (io) {
       io.to(request.sender.toString()).emit('private_chat_approved', {
@@ -235,7 +261,6 @@ router.post('/reject/:id', protect, async (req, res) => {
     request.rejectedAt = new Date()
     await request.save()
 
-    // Notify sender
     const io = getIO()
     if (io) {
       io.to(request.sender.toString()).emit('private_chat_rejected', {
@@ -267,7 +292,6 @@ router.delete('/cancel/:id', protect, async (req, res) => {
     request.status = 'cancelled'
     await request.save()
 
-    // Notify receiver
     const io = getIO()
     if (io) {
       io.to(request.receiver.toString()).emit('private_chat_cancelled', {
