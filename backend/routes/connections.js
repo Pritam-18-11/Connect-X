@@ -4,6 +4,7 @@ const ConnectionRequest = require('../models/ConnectionRequest')
 const Connection = require('../models/Connection')
 const InviteCode = require('../models/InviteCode')
 const User = require('../models/User')
+const Message = require('../models/Message')
 const { protect } = require('../middleware/auth')
 
 // ── POST /api/connections/request ─────────────────────────────
@@ -140,6 +141,8 @@ router.post('/reject/:id', protect, async (req, res) => {
 })
 
 // ── GET /api/connections/list ──────────────────────────────────
+// Returns connections enriched with lastMessage + unreadCount,
+// sorted by most recent activity (newest first) — WhatsApp-style ordering.
 router.get('/list', protect, async (req, res) => {
   try {
     const connections = await Connection.find({
@@ -150,13 +153,32 @@ router.get('/list', protect, async (req, res) => {
       .populate('user1', 'name email avatarUrl')
       .populate('user2', 'name email avatarUrl')
 
-    const connectedUsers = connections
-      .filter((conn) => conn.user1 && conn.user2)
-      .map((conn) => {
+    const validConnections = connections.filter((conn) => conn.user1 && conn.user2)
+
+    const connectedUsers = await Promise.all(
+      validConnections.map(async (conn) => {
         const other =
           conn.user1._id.toString() === req.user._id.toString()
             ? conn.user2
             : conn.user1
+
+        const lastMsg = await Message.findOne({
+          $or: [
+            { senderId: req.user._id, receiverId: other._id },
+            { senderId: other._id, receiverId: req.user._id },
+          ],
+          deletedFor: { $ne: req.user._id },
+        })
+          .sort({ createdAt: -1 })
+          .select('text messageType senderId createdAt')
+
+        const unreadCount = await Message.countDocuments({
+          senderId: other._id,
+          receiverId: req.user._id,
+          seen: false,
+          deletedFor: { $ne: req.user._id },
+        })
+
         return {
           connectionId: conn._id,
           userId: other._id,
@@ -164,8 +186,24 @@ router.get('/list', protect, async (req, res) => {
           email: other.email,
           avatarUrl: other.avatarUrl,
           connectedAt: conn.createdAt,
+          lastMessage: lastMsg
+            ? {
+                text: lastMsg.text,
+                messageType: lastMsg.messageType,
+                fromMe: lastMsg.senderId.toString() === req.user._id.toString(),
+                createdAt: lastMsg.createdAt,
+              }
+            : null,
+          unreadCount,
         }
       })
+    )
+
+    connectedUsers.sort((a, b) => {
+      const aTime = a.lastMessage ? new Date(a.lastMessage.createdAt) : new Date(a.connectedAt)
+      const bTime = b.lastMessage ? new Date(b.lastMessage.createdAt) : new Date(b.connectedAt)
+      return bTime - aTime
+    })
 
     res.json(connectedUsers)
   } catch (error) {

@@ -10,7 +10,7 @@ import {
   Users, UserPlus, LogOut, Shield, Crown,
   MessageSquare, ChevronLeft, Clock, Search, UserMinus,
   Pencil, Trash2, MoreHorizontal, Mic, Square, Play, Pause, Trash,
-  ImageIcon, ZoomIn, Sparkles,
+  ImageIcon, ZoomIn, Sparkles, Pin,
 } from 'lucide-react'
 
 // ── Date helpers ────────────────────────────────────────────────
