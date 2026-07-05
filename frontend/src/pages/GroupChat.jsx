@@ -1112,7 +1112,15 @@ export default function GroupChat() {
             )}
           </div>
         </div>
-
+        
+        {/* Pinned privacy notice — shows whenever AI Summarizer is enabled */}
+        {aiSummaryEnabled && (
+          <div className="shrink-0 mx-6 mt-3 flex items-start gap-2 bg-warn/10 border border-warn/30 text-warn rounded-lg px-4 py-2.5 font-mono text-xs">
+            <Pin className="w-4 h-4 shrink-0 mt-0.5" />
+            <p>Don't share personal details — this group is not encrypted.</p>
+          </div>
+        )}
+        
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-6 py-4" onClick={() => setShowMenu(false)}>
           {messages.length === 0 && (
