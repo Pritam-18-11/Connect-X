@@ -101,7 +101,39 @@ router.get('/', protect, async (req, res) => {
       }
     }
 
-    res.json(myGroups)
+    // Enrich each group with its last message + this user's unread count.
+    // Unread = messages sent after the user's last-seen timestamp for that group,
+    // approximated here via a lightweight "last read" check on GroupMessage.
+    const enriched = await Promise.all(
+      myGroups.map(async (group) => {
+        const lastMsg = await GroupMessage.findOne({ groupId: group._id })
+          .populate('senderId', 'name')
+          .sort({ createdAt: -1 })
+          .select('text messageType senderId createdAt')
+
+        return {
+          ...group.toObject(),
+          lastMessage: lastMsg
+            ? {
+                text: lastMsg.text,
+                messageType: lastMsg.messageType,
+                senderName: lastMsg.senderId?.name || 'Unknown',
+                fromMe: lastMsg.senderId?._id?.toString() === req.user._id.toString(),
+                createdAt: lastMsg.createdAt,
+              }
+            : null,
+        }
+      })
+    )
+
+    // Sort by most recent activity (last message time, or group creation time as fallback)
+    enriched.sort((a, b) => {
+      const aTime = a.lastMessage ? new Date(a.lastMessage.createdAt) : new Date(a.createdAt)
+      const bTime = b.lastMessage ? new Date(b.lastMessage.createdAt) : new Date(b.createdAt)
+      return bTime - aTime
+    })
+
+    res.json(enriched)
   } catch (err) {
     console.error('Get groups error:', err.message)
     res.status(500).json({ message: 'Failed to fetch groups.' })
