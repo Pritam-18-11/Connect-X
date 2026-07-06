@@ -429,6 +429,9 @@ export default function ChatWindow() {
 
         setMessages(msgRes.data)
         setConnectionId(statusRes.data.connectionId)
+        // Mark any previously-unread messages from this user as seen now that
+        // the chat window is actually open (fixes stale unread badges)
+        api.put(`/chat/seen-all/${otherUserId}`).catch((err) => console.error('Mark all seen error:', err))
         const conn = connRes.data.find((c) => c.userId.toString() === otherUserId)
         if (conn) setOtherUser(conn)
 
@@ -473,6 +476,11 @@ export default function ChatWindow() {
         prev.map((m) => (m._id === messageId ? { ...m, seen: true } : m))
       )
     }
+    const handleSeenBulk = ({ messageIds }) => {
+      setMessages((prev) =>
+        prev.map((m) => (messageIds.includes(m._id.toString()) ? { ...m, seen: true } : m))
+      )
+    }
     const handleRevoked = ({ by }) => {
       if (by === otherUserId) {
         alert('This connection has been revoked.')
@@ -495,6 +503,7 @@ export default function ChatWindow() {
     socket.on('user_typing', handleTyping)
     socket.on('user_stop_typing', handleStopTyping)
     socket.on('message_seen', handleSeen)
+    socket.on('messages_seen_bulk', handleSeenBulk)
     socket.on('connection_revoked', handleRevoked)
     socket.on('message_limit_reached', handleLimitReached)
     socket.on('message_edited', handleEdited)
@@ -506,6 +515,7 @@ export default function ChatWindow() {
       socket.off('user_typing', handleTyping)
       socket.off('user_stop_typing', handleStopTyping)
       socket.off('message_seen', handleSeen)
+      socket.off('messages_seen_bulk', handleSeenBulk)
       socket.off('connection_revoked', handleRevoked)
       socket.off('message_limit_reached', handleLimitReached)
       socket.off('message_edited', handleEdited)

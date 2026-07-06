@@ -10,7 +10,7 @@ const cloudinary = require('../utils/cloudinary')
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  limits: { fileSize: 10 * 1024 * 1024 },
 })
 
 async function areConnected(userId1, userId2) {
@@ -27,24 +27,30 @@ async function areConnected(userId1, userId2) {
 
 async function checkMessageLimit(senderUserId, receiverUserId) {
   const today = new Date().toISOString().slice(0, 10)
+
   const limit = await MessageLimit.findOne({
     ownerUserId: receiverUserId,
     targetUserId: senderUserId,
   })
+
   if (!limit) return { allowed: true }
+
   if (limit.lastResetDate !== today) {
     limit.currentCount = 0
     limit.lastResetDate = today
     await limit.save()
   }
+
   if (limit.currentCount >= limit.dailyLimit) {
     return {
       allowed: false,
       message: `Daily message limit of ${limit.dailyLimit} reached. Try again tomorrow.`,
     }
   }
+
   limit.currentCount += 1
   await limit.save()
+
   return { allowed: true, remaining: limit.dailyLimit - limit.currentCount }
 }
 
@@ -82,6 +88,50 @@ router.get('/:userId', protect, async (req, res) => {
   } catch (error) {
     console.error('Get chat error:', error.message)
     res.status(500).json({ message: 'Failed to fetch messages.' })
+  }
+})
+
+// ── PUT /api/chat/seen-all/:otherUserId ───────────────────────
+// Marks ALL unseen messages FROM otherUserId TO me as seen.
+// Called when the chat window is opened, so any messages that arrived
+// while the user wasn't actively viewing this chat get properly marked
+// seen in the database (previously only live-received messages were
+// marked via the socket 'mark_seen' event, so older unread messages
+// never cleared from the unread badge count).
+router.put('/seen-all/:otherUserId', protect, async (req, res) => {
+  try {
+    const { otherUserId } = req.params
+
+    const unseenMessages = await Message.find({
+      senderId: otherUserId,
+      receiverId: req.user._id,
+      seen: false,
+    }).select('_id')
+
+    if (unseenMessages.length === 0) {
+      return res.json({ success: true, count: 0 })
+    }
+
+    const messageIds = unseenMessages.map((m) => m._id)
+
+    await Message.updateMany(
+      { _id: { $in: messageIds } },
+      { seen: true }
+    )
+
+    // Let the sender's open chat window (if any) update their checkmarks in real time
+    const io = getIO()
+    if (io) {
+      io.to(otherUserId).emit('messages_seen_bulk', {
+        messageIds: messageIds.map((id) => id.toString()),
+        by: req.user._id,
+      })
+    }
+
+    res.json({ success: true, count: messageIds.length })
+  } catch (error) {
+    console.error('Mark all seen error:', error.message)
+    res.status(500).json({ message: 'Failed to mark messages as seen.' })
   }
 })
 
