@@ -9,7 +9,7 @@ import {
   Send, ShieldOff, Settings2, Clock, MoreVertical,
   X, Check, CheckCheck, AlertTriangle, AlertCircle, Ban,
   Pencil, Trash2, MoreHorizontal, Mic, Square, Play, Pause, Trash,
-  ImageIcon, ZoomIn,
+  ImageIcon, ZoomIn, Bot, Sparkles,
 } from 'lucide-react'
 
 // ── Date helpers ────────────────────────────────────────────────
@@ -400,6 +400,24 @@ export default function ChatWindow() {
   const [sendingImage, setSendingImage] = useState(false)
   const imageInputRef = useRef(null)
 
+  // AI Assistant state
+  const [aiAssistantStatus, setAiAssistantStatus] = useState('none') // none | pending | enabled
+  const [aiAssistantRequestedBy, setAiAssistantRequestedBy] = useState(null)
+  const [requestingAi, setRequestingAi] = useState(false)
+  const [respondingAi, setRespondingAi] = useState(false)
+  const unreadSnapshotRef = useRef([]) // message IDs unread at the moment the chat was opened
+
+  const [showAskAiModal, setShowAskAiModal] = useState(false)
+  const [askQuestion, setAskQuestion] = useState('')
+  const [aiAnswer, setAiAnswer] = useState('')
+  const [aiAnswerLoading, setAiAnswerLoading] = useState(false)
+  const [aiAnswerError, setAiAnswerError] = useState('')
+
+  const [showSummaryModal, setShowSummaryModal] = useState(false)
+  const [unreadSummary, setUnreadSummary] = useState('')
+  const [summaryLoading, setSummaryLoading] = useState(false)
+  const [summaryError, setSummaryError] = useState('')
+
   const bottomRef = useRef(null)
   const typingTimeoutRef = useRef(null)
 
@@ -427,8 +445,23 @@ export default function ChatWindow() {
           return
         }
 
+        // Snapshot which messages are still unread RIGHT NOW, before the
+        // seen-all call below marks everything as seen — this snapshot is
+        // what "Summarize Unread Messages" will actually use.
+        unreadSnapshotRef.current = msgRes.data
+          .filter(
+            (m) =>
+              m.messageType === 'text' &&
+              !m.seen &&
+              String(m.senderId) === otherUserId
+          )
+          .map((m) => m._id)
+
         setMessages(msgRes.data)
         setConnectionId(statusRes.data.connectionId)
+        setAiAssistantStatus(statusRes.data.aiAssistantStatus || 'none')
+        setAiAssistantRequestedBy(statusRes.data.aiAssistantRequestedBy || null)
+
         // Mark any previously-unread messages from this user as seen now that
         // the chat window is actually open (fixes stale unread badges)
         api.put(`/chat/seen-all/${otherUserId}`).catch((err) => console.error('Mark all seen error:', err))
@@ -498,6 +531,19 @@ export default function ChatWindow() {
       setMessages((prev) => prev.filter((m) => m._id !== messageId))
     }
 
+    const handleAiRequest = ({ by }) => {
+      setAiAssistantStatus('pending')
+      setAiAssistantRequestedBy(by._id)
+    }
+    const handleAiResponse = ({ accepted }) => {
+      setAiAssistantStatus(accepted ? 'enabled' : 'none')
+      if (!accepted) setAiAssistantRequestedBy(null)
+    }
+    const handleAiDisabled = () => {
+      setAiAssistantStatus('none')
+      setAiAssistantRequestedBy(null)
+    }
+
     socket.on('receive_message', handleReceive)
     socket.on('message_sent', handleSent)
     socket.on('user_typing', handleTyping)
@@ -508,6 +554,9 @@ export default function ChatWindow() {
     socket.on('message_limit_reached', handleLimitReached)
     socket.on('message_edited', handleEdited)
     socket.on('message_deleted', handleDeleted)
+    socket.on('ai_assistant_request', handleAiRequest)
+    socket.on('ai_assistant_response', handleAiResponse)
+    socket.on('ai_assistant_disabled', handleAiDisabled)
 
     return () => {
       socket.off('receive_message', handleReceive)
@@ -520,6 +569,9 @@ export default function ChatWindow() {
       socket.off('message_limit_reached', handleLimitReached)
       socket.off('message_edited', handleEdited)
       socket.off('message_deleted', handleDeleted)
+      socket.off('ai_assistant_request', handleAiRequest)
+      socket.off('ai_assistant_response', handleAiResponse)
+      socket.off('ai_assistant_disabled', handleAiDisabled)
     }
   }, [socket, otherUserId, navigate])
 
@@ -544,6 +596,82 @@ export default function ChatWindow() {
     socket.emit('send_message', { receiverId: otherUserId, text: input.trim() })
     socket.emit('stop_typing', { receiverId: otherUserId })
     setInput('')
+  }
+
+  // ── AI Assistant handlers ───────────────────────────────────────
+  const requestAiAssistant = async () => {
+    setRequestingAi(true)
+    try {
+      const { data } = await api.post(`/connections/ai-assistant/request/${otherUserId}`)
+      setAiAssistantStatus(data.aiAssistantStatus)
+      setAiAssistantRequestedBy(currentUserId)
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to send request.')
+    } finally {
+      setRequestingAi(false)
+    }
+  }
+
+  const respondAiAssistant = async (accept) => {
+    setRespondingAi(true)
+    try {
+      const { data } = await api.post(`/connections/ai-assistant/respond/${otherUserId}`, { accept })
+      setAiAssistantStatus(data.aiAssistantStatus)
+      if (!accept) setAiAssistantRequestedBy(null)
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to respond.')
+    } finally {
+      setRespondingAi(false)
+    }
+  }
+
+  const disableAiAssistant = async () => {
+    try {
+      await api.post(`/connections/ai-assistant/disable/${otherUserId}`)
+      setAiAssistantStatus('none')
+      setAiAssistantRequestedBy(null)
+    } catch (err) {
+      console.error('Disable AI assistant error:', err)
+    }
+  }
+
+  const handleAskAi = async () => {
+    if (!askQuestion.trim()) return
+    setAiAnswerLoading(true)
+    setAiAnswerError('')
+    setAiAnswer('')
+    try {
+      const { data } = await api.post(`/chat/${otherUserId}/ask-ai`, { question: askQuestion.trim() })
+      setAiAnswer(data.answer)
+    } catch (err) {
+      setAiAnswerError(err.response?.data?.message || 'Failed to get AI response.')
+    } finally {
+      setAiAnswerLoading(false)
+    }
+  }
+
+  const handleSummarizeUnread = async () => {
+    setShowSummaryModal(true)
+    setSummaryLoading(true)
+    setSummaryError('')
+    setUnreadSummary('')
+
+    if (unreadSnapshotRef.current.length === 0) {
+      setSummaryLoading(false)
+      setSummaryError('No unread messages to summarize.')
+      return
+    }
+
+    try {
+      const { data } = await api.post(`/chat/${otherUserId}/summarize-unread`, {
+        messageIds: unreadSnapshotRef.current,
+      })
+      setUnreadSummary(data.summary)
+    } catch (err) {
+      setSummaryError(err.response?.data?.message || 'Failed to generate summary.')
+    } finally {
+      setSummaryLoading(false)
+    }
   }
 
   // ── Image handlers ────────────────────────────────────────────
@@ -839,6 +967,11 @@ export default function ChatWindow() {
                   Blocked
                 </span>
               )}
+              {aiAssistantStatus === 'enabled' && (
+                <span className="tag text-xs text-accent border-accent/30 bg-accent/10 flex items-center gap-1">
+                  <Bot className="w-3 h-3" /> AI
+                </span>
+              )}
             </div>
             <p className="text-text-dim text-xs font-mono">
               {isBlocked
@@ -862,7 +995,7 @@ export default function ChatWindow() {
               <MoreVertical className="w-4 h-4" />
             </button>
             {showMenu && (
-              <div className="absolute top-10 right-0 w-52 panel border border-border z-20 py-1">
+              <div className="absolute top-10 right-0 w-56 panel border border-border z-20 py-1">
                 {!isBlocked ? (
                   <button
                     onClick={() => { setBlockPhase('choose'); setShowBlockModal(true); setShowMenu(false) }}
@@ -890,6 +1023,48 @@ export default function ChatWindow() {
                 >
                   <Clock className="w-4 h-4" /> Timed Connection
                 </button>
+
+                <div className="border-t border-border my-1" />
+
+                {aiAssistantStatus === 'none' && (
+                  <button
+                    onClick={() => { requestAiAssistant(); setShowMenu(false) }}
+                    disabled={requestingAi}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-text-dim hover:text-text hover:bg-void text-sm font-mono transition-colors disabled:opacity-60"
+                  >
+                    <Bot className="w-4 h-4" />
+                    {requestingAi ? 'Sending...' : 'Enable AI Assistant'}
+                  </button>
+                )}
+                {aiAssistantStatus === 'enabled' && (
+                  <>
+                    <button
+                      onClick={() => {
+                        setShowAskAiModal(true)
+                        setAskQuestion('')
+                        setAiAnswer('')
+                        setAiAnswerError('')
+                        setShowMenu(false)
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-text-dim hover:text-text hover:bg-void text-sm font-mono transition-colors"
+                    >
+                      <Sparkles className="w-4 h-4" /> Ask AI About This Chat
+                    </button>
+                    <button
+                      onClick={() => { handleSummarizeUnread(); setShowMenu(false) }}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-text-dim hover:text-text hover:bg-void text-sm font-mono transition-colors"
+                    >
+                      <Sparkles className="w-4 h-4" /> Summarize Unread Messages
+                    </button>
+                    <button
+                      onClick={() => { disableAiAssistant(); setShowMenu(false) }}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-danger hover:bg-danger/10 text-sm font-mono transition-colors"
+                    >
+                      <Bot className="w-4 h-4" /> Disable AI Assistant
+                    </button>
+                  </>
+                )}
+
                 <div className="border-t border-border my-1" />
                 <button
                   onClick={() => { setShowRevokeModal(true); setShowMenu(false) }}
@@ -909,6 +1084,38 @@ export default function ChatWindow() {
             {isBlocked
               ? 'You have blocked this user. Unblock to send messages.'
               : 'You cannot send messages to this user.'}
+          </div>
+        )}
+
+        {/* AI Assistant request banners */}
+        {aiAssistantStatus === 'pending' && aiAssistantRequestedBy && String(aiAssistantRequestedBy) !== currentUserId && (
+          <div className="shrink-0 mx-6 mt-4 flex items-center justify-between gap-3 bg-accent/10 border border-accent/30 text-accent rounded px-4 py-2.5 font-mono text-xs">
+            <div className="flex items-center gap-2">
+              <Bot className="w-4 h-4 shrink-0" />
+              <span>{otherUser?.name} wants to enable AI Assistant for this chat.</span>
+            </div>
+            <div className="flex gap-2 shrink-0">
+              <button
+                onClick={() => respondAiAssistant(true)}
+                disabled={respondingAi}
+                className="px-2.5 py-1 rounded bg-success/15 border border-success/30 text-success hover:bg-success/25 transition-colors disabled:opacity-60"
+              >
+                Accept
+              </button>
+              <button
+                onClick={() => respondAiAssistant(false)}
+                disabled={respondingAi}
+                className="px-2.5 py-1 rounded bg-danger/15 border border-danger/30 text-danger hover:bg-danger/25 transition-colors disabled:opacity-60"
+              >
+                Decline
+              </button>
+            </div>
+          </div>
+        )}
+        {aiAssistantStatus === 'pending' && aiAssistantRequestedBy && String(aiAssistantRequestedBy) === currentUserId && (
+          <div className="shrink-0 mx-6 mt-4 flex items-center gap-2 bg-warn/10 border border-warn/30 text-warn rounded px-4 py-2.5 font-mono text-xs">
+            <Bot className="w-4 h-4 shrink-0" />
+            Waiting for {otherUser?.name} to approve AI Assistant...
           </div>
         )}
 
@@ -1080,6 +1287,68 @@ export default function ChatWindow() {
           onCancel={cancelCrop}
           onConfirm={confirmCrop}
         />
+      )}
+
+      {/* Ask AI Modal */}
+      {showAskAiModal && (
+        <Modal onClose={() => setShowAskAiModal(false)}>
+          <h3 className="text-text font-semibold text-lg mb-1 flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-accent" /> Ask AI
+          </h3>
+          <p className="text-text-dim text-xs font-mono mb-4">
+            Ask about anything discussed in this chat with {otherUser?.name}.
+          </p>
+          <div className="flex gap-2 mb-4">
+            <input
+              value={askQuestion}
+              onChange={(e) => setAskQuestion(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleAskAi()}
+              placeholder="e.g. what did we decide about the trip?"
+              className="input-field flex-1 text-sm"
+            />
+            <button
+              onClick={handleAskAi}
+              disabled={aiAnswerLoading || !askQuestion.trim()}
+              className="btn-primary px-4 disabled:opacity-40"
+            >
+              {aiAnswerLoading ? '...' : 'Ask'}
+            </button>
+          </div>
+          {aiAnswerLoading && (
+            <div className="flex justify-center py-6">
+              <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+            </div>
+          )}
+          {aiAnswerError && <p className="text-danger text-sm font-mono">{aiAnswerError}</p>}
+          {aiAnswer && (
+            <div className="text-text text-sm font-mono leading-relaxed whitespace-pre-line max-h-80 overflow-y-auto bg-void border border-border rounded-lg p-3">
+              {aiAnswer}
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {/* Unread Summary Modal */}
+      {showSummaryModal && (
+        <Modal onClose={() => setShowSummaryModal(false)}>
+          <h3 className="text-text font-semibold text-lg mb-1 flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-accent" /> Unread Summary
+          </h3>
+          <p className="text-text-dim text-xs font-mono mb-4">
+            AI summary of messages from {otherUser?.name} that were unread when you opened this chat
+          </p>
+          {summaryLoading ? (
+            <div className="flex justify-center py-8">
+              <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : summaryError ? (
+            <p className="text-danger text-sm font-mono text-center py-4">{summaryError}</p>
+          ) : (
+            <div className="text-text text-sm font-mono leading-relaxed whitespace-pre-line max-h-96 overflow-y-auto">
+              {unreadSummary}
+            </div>
+          )}
+        </Modal>
       )}
 
       {/* Block Modal */}

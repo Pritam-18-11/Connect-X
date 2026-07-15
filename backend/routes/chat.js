@@ -4,9 +4,11 @@ const multer = require('multer')
 const Message = require('../models/Message')
 const Connection = require('../models/Connection')
 const MessageLimit = require('../models/MessageLimit')
+const User = require('../models/User')
 const { protect } = require('../middleware/auth')
 const { getIO } = require('../socket/socketManager')
 const cloudinary = require('../utils/cloudinary')
+const { askAboutConversation, summarizeMessages } = require('../utils/aiClient')
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -92,12 +94,6 @@ router.get('/:userId', protect, async (req, res) => {
 })
 
 // ── PUT /api/chat/seen-all/:otherUserId ───────────────────────
-// Marks ALL unseen messages FROM otherUserId TO me as seen.
-// Called when the chat window is opened, so any messages that arrived
-// while the user wasn't actively viewing this chat get properly marked
-// seen in the database (previously only live-received messages were
-// marked via the socket 'mark_seen' event, so older unread messages
-// never cleared from the unread badge count).
 router.put('/seen-all/:otherUserId', protect, async (req, res) => {
   try {
     const { otherUserId } = req.params
@@ -119,7 +115,6 @@ router.put('/seen-all/:otherUserId', protect, async (req, res) => {
       { seen: true }
     )
 
-    // Let the sender's open chat window (if any) update their checkmarks in real time
     const io = getIO()
     if (io) {
       io.to(otherUserId).emit('messages_seen_bulk', {
@@ -132,6 +127,125 @@ router.put('/seen-all/:otherUserId', protect, async (req, res) => {
   } catch (error) {
     console.error('Mark all seen error:', error.message)
     res.status(500).json({ message: 'Failed to mark messages as seen.' })
+  }
+})
+
+// ── POST /api/chat/:otherUserId/ask-ai ─────────────────────────
+router.post('/:otherUserId/ask-ai', protect, async (req, res) => {
+  try {
+    const { question } = req.body
+    if (!question || !question.trim()) {
+      return res.status(400).json({ message: 'Question is required.' })
+    }
+
+    const connected = await areConnected(req.user._id, req.params.otherUserId)
+    if (!connected) {
+      return res.status(403).json({ message: 'You are not connected with this user.' })
+    }
+
+    const connection = await Connection.findOne({
+      $or: [
+        { user1: req.user._id, user2: req.params.otherUserId },
+        { user1: req.params.otherUserId, user2: req.user._id },
+      ],
+      isActive: true,
+      isRevoked: false,
+    })
+
+    if (!connection || connection.aiAssistantStatus !== 'enabled') {
+      return res.status(403).json({ message: 'AI Assistant is not enabled for this chat.' })
+    }
+
+    const messages = await Message.find({
+      $or: [
+        { senderId: req.user._id, receiverId: req.params.otherUserId },
+        { senderId: req.params.otherUserId, receiverId: req.user._id },
+      ],
+      messageType: 'text',
+      deletedFor: { $ne: req.user._id },
+    }).sort({ createdAt: 1 })
+
+    if (messages.length === 0) {
+      return res.status(400).json({ message: 'No text messages found in this chat yet.' })
+    }
+
+    const otherUser = await User.findById(req.params.otherUserId).select('name')
+
+    const formatted = messages.map((m) => ({
+      senderName:
+        m.senderId.toString() === req.user._id.toString()
+          ? req.user.name
+          : otherUser?.name || 'Other',
+      text: m.text,
+    }))
+
+    const answer = await askAboutConversation(formatted, question.trim())
+
+    res.json({ answer })
+  } catch (error) {
+    console.error('Ask AI error:', error.message)
+    res.status(500).json({ message: 'Failed to get AI response.' })
+  }
+})
+
+// ── POST /api/chat/:otherUserId/summarize-unread ───────────────
+// Accepts a client-captured snapshot of message IDs (taken before the
+// chat window auto-marks them seen). Falls back to seen:false if no
+// snapshot is provided, though by the time this route is normally
+// called the messages will already be marked seen.
+router.post('/:otherUserId/summarize-unread', protect, async (req, res) => {
+  try {
+    const { messageIds } = req.body
+
+    const connected = await areConnected(req.user._id, req.params.otherUserId)
+    if (!connected) {
+      return res.status(403).json({ message: 'You are not connected with this user.' })
+    }
+
+    const connection = await Connection.findOne({
+      $or: [
+        { user1: req.user._id, user2: req.params.otherUserId },
+        { user1: req.params.otherUserId, user2: req.user._id },
+      ],
+      isActive: true,
+      isRevoked: false,
+    })
+
+    if (!connection || connection.aiAssistantStatus !== 'enabled') {
+      return res.status(403).json({ message: 'AI Assistant is not enabled for this chat.' })
+    }
+
+    const query = {
+      senderId: req.params.otherUserId,
+      receiverId: req.user._id,
+      messageType: 'text',
+    }
+
+    if (Array.isArray(messageIds) && messageIds.length > 0) {
+      query._id = { $in: messageIds }
+    } else {
+      query.seen = false
+    }
+
+    const unreadMessages = await Message.find(query).sort({ createdAt: 1 })
+
+    if (unreadMessages.length === 0) {
+      return res.status(400).json({ message: 'No unread text messages to summarize.' })
+    }
+
+    const otherUser = await User.findById(req.params.otherUserId).select('name')
+
+    const formatted = unreadMessages.map((m) => ({
+      senderName: otherUser?.name || 'Other',
+      text: m.text,
+    }))
+
+    const summary = await summarizeMessages(formatted)
+
+    res.json({ summary, messageCount: unreadMessages.length })
+  } catch (error) {
+    console.error('Summarize unread error:', error.message)
+    res.status(500).json({ message: 'Failed to generate summary.' })
   }
 })
 

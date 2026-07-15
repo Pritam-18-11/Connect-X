@@ -29,6 +29,16 @@ const connectionSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    aiAssistantStatus: {
+      type: String,
+      enum: ['none', 'pending', 'enabled'],
+      default: 'none',
+    },
+    aiAssistantRequestedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
   },
   { timestamps: true }
 )

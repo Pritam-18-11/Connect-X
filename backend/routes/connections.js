@@ -6,6 +6,7 @@ const InviteCode = require('../models/InviteCode')
 const User = require('../models/User')
 const Message = require('../models/Message')
 const { protect } = require('../middleware/auth')
+const { getIO } = require('../socket/socketManager')
 
 // ── POST /api/connections/request ─────────────────────────────
 router.post('/request', protect, async (req, res) => {
@@ -141,8 +142,6 @@ router.post('/reject/:id', protect, async (req, res) => {
 })
 
 // ── GET /api/connections/list ──────────────────────────────────
-// Returns connections enriched with lastMessage + unreadCount,
-// sorted by most recent activity (newest first) — WhatsApp-style ordering.
 router.get('/list', protect, async (req, res) => {
   try {
     const connections = await Connection.find({
@@ -265,7 +264,12 @@ router.get('/status/:userId', protect, async (req, res) => {
     })
 
     if (activeConnection) {
-      return res.json({ status: 'connected', connectionId: activeConnection._id })
+      return res.json({
+        status: 'connected',
+        connectionId: activeConnection._id,
+        aiAssistantStatus: activeConnection.aiAssistantStatus,
+        aiAssistantRequestedBy: activeConnection.aiAssistantRequestedBy,
+      })
     }
 
     const revokedConnection = await Connection.findOne({
@@ -284,6 +288,122 @@ router.get('/status/:userId', protect, async (req, res) => {
   } catch (error) {
     console.error('Status check error:', error.message)
     res.status(500).json({ message: 'Failed to check status.' })
+  }
+})
+
+// ── Helper: find active connection between two users ──────────
+async function findActiveConnection(userId1, userId2) {
+  return Connection.findOne({
+    $or: [
+      { user1: userId1, user2: userId2 },
+      { user1: userId2, user2: userId1 },
+    ],
+    isActive: true,
+    isRevoked: false,
+  })
+}
+
+// ── POST /api/connections/ai-assistant/request/:otherUserId ───
+router.post('/ai-assistant/request/:otherUserId', protect, async (req, res) => {
+  try {
+    const myId = req.user._id.toString()
+    const otherId = req.params.otherUserId
+
+    const connection = await findActiveConnection(myId, otherId)
+    if (!connection) {
+      return res.status(404).json({ message: 'Connection not found.' })
+    }
+
+    if (connection.aiAssistantStatus === 'enabled') {
+      return res.status(400).json({ message: 'AI Assistant is already enabled for this chat.' })
+    }
+    if (connection.aiAssistantStatus === 'pending') {
+      return res.status(400).json({ message: 'A request is already pending.' })
+    }
+
+    connection.aiAssistantStatus = 'pending'
+    connection.aiAssistantRequestedBy = req.user._id
+    await connection.save()
+
+    const io = getIO()
+    if (io) {
+      io.to(otherId).emit('ai_assistant_request', {
+        by: { _id: req.user._id, name: req.user.name },
+      })
+    }
+
+    res.json({ success: true, aiAssistantStatus: connection.aiAssistantStatus })
+  } catch (err) {
+    console.error('AI assistant request error:', err.message)
+    res.status(500).json({ message: 'Failed to send request.' })
+  }
+})
+
+// ── POST /api/connections/ai-assistant/respond/:otherUserId ───
+router.post('/ai-assistant/respond/:otherUserId', protect, async (req, res) => {
+  try {
+    const { accept } = req.body
+    const myId = req.user._id.toString()
+    const otherId = req.params.otherUserId
+
+    const connection = await findActiveConnection(myId, otherId)
+    if (!connection) {
+      return res.status(404).json({ message: 'Connection not found.' })
+    }
+
+    if (connection.aiAssistantStatus !== 'pending') {
+      return res.status(400).json({ message: 'No pending request.' })
+    }
+
+    if (connection.aiAssistantRequestedBy?.toString() === myId) {
+      return res.status(403).json({ message: 'You cannot respond to your own request.' })
+    }
+
+    connection.aiAssistantStatus = accept ? 'enabled' : 'none'
+    if (!accept) connection.aiAssistantRequestedBy = null
+    await connection.save()
+
+    const io = getIO()
+    if (io) {
+      io.to(otherId).emit('ai_assistant_response', {
+        accepted: !!accept,
+        by: { _id: req.user._id, name: req.user.name },
+      })
+    }
+
+    res.json({ success: true, aiAssistantStatus: connection.aiAssistantStatus })
+  } catch (err) {
+    console.error('AI assistant respond error:', err.message)
+    res.status(500).json({ message: 'Failed to respond to request.' })
+  }
+})
+
+// ── POST /api/connections/ai-assistant/disable/:otherUserId ───
+router.post('/ai-assistant/disable/:otherUserId', protect, async (req, res) => {
+  try {
+    const myId = req.user._id.toString()
+    const otherId = req.params.otherUserId
+
+    const connection = await findActiveConnection(myId, otherId)
+    if (!connection) {
+      return res.status(404).json({ message: 'Connection not found.' })
+    }
+
+    connection.aiAssistantStatus = 'none'
+    connection.aiAssistantRequestedBy = null
+    await connection.save()
+
+    const io = getIO()
+    if (io) {
+      io.to(otherId).emit('ai_assistant_disabled', {
+        by: { _id: req.user._id, name: req.user.name },
+      })
+    }
+
+    res.json({ success: true, aiAssistantStatus: 'none' })
+  } catch (err) {
+    console.error('AI assistant disable error:', err.message)
+    res.status(500).json({ message: 'Failed to disable AI assistant.' })
   }
 })
 
