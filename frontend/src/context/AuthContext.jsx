@@ -7,7 +7,6 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  // Restore user session
   useEffect(() => {
     const token = sessionStorage.getItem('token')
     const savedUser = sessionStorage.getItem('user')
@@ -25,27 +24,15 @@ export function AuthProvider({ children }) {
   }, [])
 
   const register = async ({ name, email, password }) => {
-    const { data } = await api.post('/auth/register', {
-      name,
-      email,
-      password,
-    })
-
+    const { data } = await api.post('/auth/register', { name, email, password })
     return data
   }
 
   const login = async ({ email, password }) => {
-    const { data } = await api.post('/auth/login', {
-      email,
-      password,
-    })
-
-    // Store separately per tab/window
+    const { data } = await api.post('/auth/login', { email, password })
     sessionStorage.setItem('token', data.token)
     sessionStorage.setItem('user', JSON.stringify(data.user))
-
     setUser(data.user)
-
     return data
   }
 
@@ -53,6 +40,16 @@ export function AuthProvider({ children }) {
     sessionStorage.removeItem('token')
     sessionStorage.removeItem('user')
     setUser(null)
+  }
+
+  // ✅ NEW: updateUser — Settings page theke call korle
+  // AuthContext er user state + sessionStorage duitai update hobe
+  const updateUser = (updatedFields) => {
+    setUser((prev) => {
+      const merged = { ...prev, ...updatedFields }
+      sessionStorage.setItem('user', JSON.stringify(merged))
+      return merged
+    })
   }
 
   return (
@@ -63,6 +60,7 @@ export function AuthProvider({ children }) {
         login,
         register,
         logout,
+        updateUser,
       }}
     >
       {children}

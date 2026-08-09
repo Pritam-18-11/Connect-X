@@ -8,7 +8,7 @@ import AvatarViewerModal from '../components/AvatarViewerModal'
 import { User, Shield, Bell, Trash2, Save, Check, AlertCircle, X, Camera, Loader2 } from 'lucide-react'
 
 export default function Settings() {
-  const { user, logout } = useAuth()
+  const { user, logout, updateUser } = useAuth()
   const navigate = useNavigate()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -54,12 +54,6 @@ export default function Settings() {
     }
   }
 
-  const syncSessionUser = (updatedUser) => {
-    const savedUser = JSON.parse(sessionStorage.getItem('user') || '{}')
-    const merged = { ...savedUser, ...updatedUser }
-    sessionStorage.setItem('user', JSON.stringify(merged))
-  }
-
   // ── Avatar handlers ───────────────────────────────────────────
   const handleAvatarSelect = (e) => {
     const file = e.target.files?.[0]
@@ -91,7 +85,8 @@ export default function Settings() {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
       setAvatarUrl(data.user.avatarUrl)
-      syncSessionUser({ avatarUrl: data.user.avatarUrl })
+      // ✅ FIX: AuthContext user state update hobe immediately
+      updateUser({ avatarUrl: data.user.avatarUrl })
     } catch (err) {
       setAvatarError(err.response?.data?.message || 'Failed to upload photo.')
     } finally {
@@ -106,7 +101,8 @@ export default function Settings() {
     try {
       await api.delete('/auth/me/avatar')
       setAvatarUrl(null)
-      syncSessionUser({ avatarUrl: null })
+      // ✅ FIX: AuthContext user state update hobe immediately
+      updateUser({ avatarUrl: null })
     } catch (err) {
       setAvatarError(err.response?.data?.message || 'Failed to remove photo.')
     } finally {
@@ -127,7 +123,9 @@ export default function Settings() {
       if (password.trim()) payload.password = password.trim()
 
       const { data } = await api.put('/auth/me', payload)
-      syncSessionUser({
+
+      // ✅ FIX: AuthContext user state update — Sidebar immediately reflect korbe
+      updateUser({
         name: data.user.name,
         email: data.user.email,
         autoRejectInvites: data.user.autoRejectInvites,

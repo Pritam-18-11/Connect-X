@@ -398,7 +398,7 @@ function SearchResultCard({ msg, searchTab, keyword, onClick }) {
 export default function GroupChat() {
   const { id: groupId } = useParams()
   const { user } = useAuth()
-  const { socket } = useSocket()
+  const { socket, leaveGroup } = useSocket()
   const navigate = useNavigate()
 
   const [group, setGroup] = useState(null)
@@ -548,6 +548,12 @@ export default function GroupChat() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  useEffect(() => {
+    return () => {
+      leaveGroup()
+    }
+  }, [])
+  
   const sendMessage = (e) => {
     e.preventDefault()
     if (!input.trim() || !socket) return

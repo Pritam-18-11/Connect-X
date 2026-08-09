@@ -88,7 +88,6 @@ router.get('/requests', protect, async (req, res) => {
     }).populate('senderId', 'name email avatarUrl')
 
     const validRequests = requests.filter((r) => r.senderId)
-
     res.json(validRequests)
   } catch (error) {
     console.error('Get requests error:', error.message)
@@ -142,10 +141,13 @@ router.post('/reject/:id', protect, async (req, res) => {
 })
 
 // ── GET /api/connections/list ──────────────────────────────────
+// ✅ FIX: N+1 query problem solved — MongoDB aggregation use kora holo
 router.get('/list', protect, async (req, res) => {
   try {
+    const userId = req.user._id
+
     const connections = await Connection.find({
-      $or: [{ user1: req.user._id }, { user2: req.user._id }],
+      $or: [{ user1: userId }, { user2: userId }],
       isActive: true,
       isRevoked: false,
     })
@@ -154,49 +156,100 @@ router.get('/list', protect, async (req, res) => {
 
     const validConnections = connections.filter((conn) => conn.user1 && conn.user2)
 
-    const connectedUsers = await Promise.all(
-      validConnections.map(async (conn) => {
-        const other =
-          conn.user1._id.toString() === req.user._id.toString()
-            ? conn.user2
-            : conn.user1
+    if (validConnections.length === 0) return res.json([])
 
-        const lastMsg = await Message.findOne({
-          $or: [
-            { senderId: req.user._id, receiverId: other._id },
-            { senderId: other._id, receiverId: req.user._id },
-          ],
-          deletedFor: { $ne: req.user._id },
-        })
-          .sort({ createdAt: -1 })
-          .select('text messageType senderId createdAt')
-
-        const unreadCount = await Message.countDocuments({
-          senderId: other._id,
-          receiverId: req.user._id,
-          seen: false,
-          deletedFor: { $ne: req.user._id },
-        })
-
-        return {
-          connectionId: conn._id,
-          userId: other._id,
-          name: other.name,
-          email: other.email,
-          avatarUrl: other.avatarUrl,
-          connectedAt: conn.createdAt,
-          lastMessage: lastMsg
-            ? {
-                text: lastMsg.text,
-                messageType: lastMsg.messageType,
-                fromMe: lastMsg.senderId.toString() === req.user._id.toString(),
-                createdAt: lastMsg.createdAt,
-              }
-            : null,
-          unreadCount,
-        }
-      })
+    // ✅ Get all other user IDs at once
+    const otherUserIds = validConnections.map((conn) =>
+      conn.user1._id.toString() === userId.toString()
+        ? conn.user2._id
+        : conn.user1._id
     )
+
+    // ✅ Single aggregation query for last messages — replaces N queries
+    const lastMessages = await Message.aggregate([
+      {
+        $match: {
+          $or: otherUserIds.map((otherId) => ({
+            $or: [
+              { senderId: userId, receiverId: otherId },
+              { senderId: otherId, receiverId: userId },
+            ],
+          })),
+          deletedFor: { $ne: userId },
+        },
+      },
+      { $sort: { createdAt: -1 } },
+      {
+        $group: {
+          _id: {
+            $cond: [
+              { $eq: ['$senderId', userId] },
+              '$receiverId',
+              '$senderId',
+            ],
+          },
+          text: { $first: '$text' },
+          messageType: { $first: '$messageType' },
+          senderId: { $first: '$senderId' },
+          createdAt: { $first: '$createdAt' },
+        },
+      },
+    ])
+
+    // ✅ Single aggregation query for unread counts — replaces N queries
+    const unreadCounts = await Message.aggregate([
+      {
+        $match: {
+          receiverId: userId,
+          seen: false,
+          deletedFor: { $ne: userId },
+          senderId: { $in: otherUserIds },
+        },
+      },
+      {
+        $group: {
+          _id: '$senderId',
+          count: { $sum: 1 },
+        },
+      },
+    ])
+
+    // ✅ Map results for O(1) lookup
+    const lastMsgMap = {}
+    lastMessages.forEach((m) => {
+      lastMsgMap[m._id.toString()] = m
+    })
+
+    const unreadMap = {}
+    unreadCounts.forEach((u) => {
+      unreadMap[u._id.toString()] = u.count
+    })
+
+    const connectedUsers = validConnections.map((conn) => {
+      const other =
+        conn.user1._id.toString() === userId.toString() ? conn.user2 : conn.user1
+
+      const lastMsg = lastMsgMap[other._id.toString()]
+      const unreadCount = unreadMap[other._id.toString()] || 0
+
+      return {
+        connectionId: conn._id,
+        userId: other._id,
+        name: other.name,
+        email: other.email,
+        avatarUrl: other.avatarUrl,
+        connectedAt: conn.createdAt,
+        lastMessage: lastMsg
+          ? {
+              text: lastMsg.text,
+              messageType: lastMsg.messageType,
+              fromMe: lastMsg.senderId.toString() === userId.toString(),
+              createdAt: lastMsg.createdAt,
+            }
+          : null,
+        unreadCount,
+      }
+    })
 
     connectedUsers.sort((a, b) => {
       const aTime = a.lastMessage ? new Date(a.lastMessage.createdAt) : new Date(a.connectedAt)
@@ -291,7 +344,7 @@ router.get('/status/:userId', protect, async (req, res) => {
   }
 })
 
-// ── Helper: find active connection between two users ──────────
+// ── Helper ────────────────────────────────────────────────────
 async function findActiveConnection(userId1, userId2) {
   return Connection.findOne({
     $or: [

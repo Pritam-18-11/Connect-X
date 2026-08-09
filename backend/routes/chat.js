@@ -3,12 +3,13 @@ const router = express.Router()
 const multer = require('multer')
 const Message = require('../models/Message')
 const Connection = require('../models/Connection')
-const MessageLimit = require('../models/MessageLimit')
+const Block = require('../models/Block')
 const User = require('../models/User')
 const { protect } = require('../middleware/auth')
 const { getIO } = require('../socket/socketManager')
 const cloudinary = require('../utils/cloudinary')
 const { askAboutConversation, summarizeMessages } = require('../utils/aiClient')
+const { checkAndUpdateLimit } = require('../utils/messageLimit')
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -27,33 +28,15 @@ async function areConnected(userId1, userId2) {
   return !!conn
 }
 
-async function checkMessageLimit(senderUserId, receiverUserId) {
-  const today = new Date().toISOString().slice(0, 10)
-
-  const limit = await MessageLimit.findOne({
-    ownerUserId: receiverUserId,
-    targetUserId: senderUserId,
+// ✅ NEW: Shared block check helper
+async function isBlocked(userId1, userId2) {
+  const block = await Block.findOne({
+    $or: [
+      { blockedBy: userId1, blockedUser: userId2 },
+      { blockedBy: userId2, blockedUser: userId1 },
+    ],
   })
-
-  if (!limit) return { allowed: true }
-
-  if (limit.lastResetDate !== today) {
-    limit.currentCount = 0
-    limit.lastResetDate = today
-    await limit.save()
-  }
-
-  if (limit.currentCount >= limit.dailyLimit) {
-    return {
-      allowed: false,
-      message: `Daily message limit of ${limit.dailyLimit} reached. Try again tomorrow.`,
-    }
-  }
-
-  limit.currentCount += 1
-  await limit.save()
-
-  return { allowed: true, remaining: limit.dailyLimit - limit.currentCount }
+  return !!block
 }
 
 // ── GET /api/chat/stats/today ─────────────────────────────────
@@ -189,10 +172,6 @@ router.post('/:otherUserId/ask-ai', protect, async (req, res) => {
 })
 
 // ── POST /api/chat/:otherUserId/summarize-unread ───────────────
-// Accepts a client-captured snapshot of message IDs (taken before the
-// chat window auto-marks them seen). Falls back to seen:false if no
-// snapshot is provided, though by the time this route is normally
-// called the messages will already be marked seen.
 router.post('/:otherUserId/summarize-unread', protect, async (req, res) => {
   try {
     const { messageIds } = req.body
@@ -256,14 +235,24 @@ router.post('/send', protect, async (req, res) => {
     if (!text || !text.trim()) {
       return res.status(400).json({ message: 'Message cannot be empty.' })
     }
+
+    // ✅ FIX: Block check added
+    const blocked = await isBlocked(req.user._id, receiverId)
+    if (blocked) {
+      return res.status(403).json({ message: 'Cannot send message to this user.' })
+    }
+
     const connected = await areConnected(req.user._id, receiverId)
     if (!connected) {
       return res.status(403).json({ message: 'You are not connected with this user.' })
     }
-    const limitCheck = await checkMessageLimit(req.user._id, receiverId)
+
+    // ✅ FIX: Using shared utility
+    const limitCheck = await checkAndUpdateLimit(req.user._id, receiverId)
     if (!limitCheck.allowed) {
       return res.status(429).json({ message: limitCheck.message })
     }
+
     const message = await Message.create({
       senderId: req.user._id,
       receiverId,
@@ -284,10 +273,17 @@ router.post('/send-voice', protect, upload.single('audio'), async (req, res) => 
     if (!req.file) return res.status(400).json({ message: 'No audio file provided.' })
     if (!receiverId) return res.status(400).json({ message: 'receiverId is required.' })
 
+    // ✅ FIX: Block check added
+    const blocked = await isBlocked(req.user._id, receiverId)
+    if (blocked) {
+      return res.status(403).json({ message: 'Cannot send message to this user.' })
+    }
+
     const connected = await areConnected(req.user._id, receiverId)
     if (!connected) return res.status(403).json({ message: 'You are not connected with this user.' })
 
-    const limitCheck = await checkMessageLimit(req.user._id, receiverId)
+    // ✅ FIX: Using shared utility
+    const limitCheck = await checkAndUpdateLimit(req.user._id, receiverId)
     if (!limitCheck.allowed) return res.status(429).json({ message: limitCheck.message })
 
     const base64Audio = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`
@@ -336,10 +332,17 @@ router.post('/send-image', protect, upload.single('image'), async (req, res) => 
     if (!req.file) return res.status(400).json({ message: 'No image file provided.' })
     if (!receiverId) return res.status(400).json({ message: 'receiverId is required.' })
 
+    // ✅ FIX: Block check added
+    const blocked = await isBlocked(req.user._id, receiverId)
+    if (blocked) {
+      return res.status(403).json({ message: 'Cannot send message to this user.' })
+    }
+
     const connected = await areConnected(req.user._id, receiverId)
     if (!connected) return res.status(403).json({ message: 'You are not connected with this user.' })
 
-    const limitCheck = await checkMessageLimit(req.user._id, receiverId)
+    // ✅ FIX: Using shared utility
+    const limitCheck = await checkAndUpdateLimit(req.user._id, receiverId)
     if (!limitCheck.allowed) return res.status(429).json({ message: limitCheck.message })
 
     const base64Image = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`
@@ -379,10 +382,17 @@ router.post('/send-image', protect, upload.single('image'), async (req, res) => 
 })
 
 // ── PUT /api/chat/seen/:messageId ─────────────────────────────
+// ✅ FIX: Receiver authorization added
 router.put('/seen/:messageId', protect, async (req, res) => {
   try {
     const message = await Message.findById(req.params.messageId)
     if (!message) return res.status(404).json({ message: 'Message not found.' })
+
+    // Only the actual receiver can mark as seen
+    if (message.receiverId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Not authorized.' })
+    }
+
     message.seen = true
     await message.save()
     res.json({ success: true })

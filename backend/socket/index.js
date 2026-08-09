@@ -3,37 +3,16 @@ const jwt = require('jsonwebtoken')
 const User = require('../models/User')
 const Message = require('../models/Message')
 const Connection = require('../models/Connection')
+const Block = require('../models/Block')
 const MessageLimit = require('../models/MessageLimit')
 const Group = require('../models/Group')
 const GroupMessage = require('../models/GroupMessage')
+const { checkAndUpdateLimit } = require('../utils/messageLimit')
 
 const onlineUsers = new Map()
 
 function isCreator(group, userId) {
   return group.createdBy.toString() === userId.toString()
-}
-
-async function checkAndUpdateLimit(senderUserId, receiverUserId) {
-  const today = new Date().toISOString().slice(0, 10)
-  const limit = await MessageLimit.findOne({
-    ownerUserId: receiverUserId,
-    targetUserId: senderUserId,
-  })
-  if (!limit) return { allowed: true }
-  if (limit.lastResetDate !== today) {
-    limit.currentCount = 0
-    limit.lastResetDate = today
-    await limit.save()
-  }
-  if (limit.currentCount >= limit.dailyLimit) {
-    return {
-      allowed: false,
-      message: `Daily message limit of ${limit.dailyLimit} reached. Try again tomorrow.`,
-    }
-  }
-  limit.currentCount += 1
-  await limit.save()
-  return { allowed: true }
 }
 
 function initSocket(server) {
@@ -43,7 +22,7 @@ function initSocket(server) {
       methods: ['GET', 'POST'],
       credentials: true,
     },
-    maxHttpBufferSize: 1e7, // 10MB — not used for voice (handled via REST), kept safe default
+    maxHttpBufferSize: 1e7,
   })
 
   io.use(async (socket, next) => {
@@ -81,6 +60,18 @@ function initSocket(server) {
     socket.on('send_message', async ({ receiverId, text }) => {
       try {
         if (!text || !text.trim()) return
+
+        // ✅ FIX: Block check added
+        const blockExists = await Block.findOne({
+          $or: [
+            { blockedBy: userId, blockedUser: receiverId },
+            { blockedBy: receiverId, blockedUser: userId },
+          ],
+        })
+        if (blockExists) {
+          socket.emit('error_message', { message: 'Cannot send message to this user.' })
+          return
+        }
 
         const conn = await Connection.findOne({
           $or: [
@@ -133,8 +124,13 @@ function initSocket(server) {
     })
 
     // ── Mark Seen ─────────────────────────────────────────────
+    // ✅ FIX: Authorization added — only actual receiver can mark seen
     socket.on('mark_seen', async ({ messageId, senderId }) => {
       try {
+        const message = await Message.findById(messageId)
+        if (!message) return
+        if (message.receiverId.toString() !== userId) return
+
         await Message.findByIdAndUpdate(messageId, { seen: true })
         io.to(senderId).emit('message_seen', { messageId })
       } catch (err) {
@@ -152,8 +148,21 @@ function initSocket(server) {
     })
 
     // ── Group: Join room ──────────────────────────────────────
-    socket.on('join_group', ({ groupId }) => {
-      socket.join(`group_${groupId}`)
+    // ✅ FIX: Member verification added
+    socket.on('join_group', async ({ groupId }) => {
+      try {
+        const group = await Group.findOne({
+          _id: groupId,
+          members: socket.user._id,
+        })
+        if (!group) {
+          socket.emit('error_message', { message: 'You are not a member of this group.' })
+          return
+        }
+        socket.join(`group_${groupId}`)
+      } catch (err) {
+        console.error('Join group error:', err.message)
+      }
     })
 
     // ── Group: Send message (text) ─────────────────────────────
@@ -197,7 +206,7 @@ function initSocket(server) {
         if (!message) return
         if (message.senderId.toString() !== userId) return
         if (message.isDeletedForEveryone) return
-        if (message.messageType === 'voice') return // voice messages can't be edited
+        if (message.messageType === 'voice') return
 
         message.text = text.trim()
         message.isEdited = true

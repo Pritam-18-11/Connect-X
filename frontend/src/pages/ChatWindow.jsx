@@ -353,7 +353,7 @@ function Modal({ children, onClose }) {
 export default function ChatWindow() {
   const { userId: otherUserId } = useParams()
   const { user } = useAuth()
-  const { socket, onlineUsers, clearUnread } = useSocket()
+  const { socket, onlineUsers, clearUnread, leaveChat } = useSocket()
   const navigate = useNavigate()
 
   const [messages, setMessages] = useState([])
@@ -427,6 +427,12 @@ export default function ChatWindow() {
   useEffect(() => {
     if (otherUserId) clearUnread(otherUserId)
   }, [otherUserId])
+  
+  useEffect(() => {
+    return () => {
+      leaveChat()
+    }
+  }, [])
 
   useEffect(() => {
     const fetchData = async () => {

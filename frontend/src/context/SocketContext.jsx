@@ -9,8 +9,12 @@ export function SocketProvider({ children }) {
 
   const [socket, setSocket] = useState(null)
   const [onlineUsers, setOnlineUsers] = useState([])
-  const [unreadChats, setUnreadChats] = useState({})   // { userId: count }
-  const [unreadGroups, setUnreadGroups] = useState({}) // { groupId: count }
+  const [unreadChats, setUnreadChats] = useState({})
+  const [unreadGroups, setUnreadGroups] = useState({})
+
+  // ✅ NEW: Track which chat/group is currently active
+  const activeChatRef = useRef(null)
+  const activeGroupRef = useRef(null)
 
   const socketRef = useRef(null)
 
@@ -64,13 +68,13 @@ export function SocketProvider({ children }) {
       setOnlineUsers((prev) => prev.filter((id) => id !== userId))
     })
 
-    // Private chat unread count
+    // ✅ FIX: Only increment unread if NOT currently viewing that chat
     s.on('receive_message', (msg) => {
       const senderId = typeof msg.senderId === 'object'
         ? msg.senderId?._id?.toString()
         : msg.senderId?.toString()
 
-      if (senderId) {
+      if (senderId && activeChatRef.current !== senderId) {
         setUnreadChats((prev) => ({
           ...prev,
           [senderId]: (prev[senderId] || 0) + 1
@@ -78,7 +82,7 @@ export function SocketProvider({ children }) {
       }
     })
 
-    // Group chat unread count
+    // ✅ FIX: Only increment unread if NOT currently viewing that group
     s.on('receive_group_message', (msg) => {
       const groupId = typeof msg.groupId === 'object'
         ? msg.groupId?._id?.toString()
@@ -89,7 +93,7 @@ export function SocketProvider({ children }) {
         : msg.senderId?.toString()
 
       const currentUserId = String(user?.id || user?._id || '')
-      if (groupId && senderId !== currentUserId) {
+      if (groupId && senderId !== currentUserId && activeGroupRef.current !== groupId) {
         setUnreadGroups((prev) => ({
           ...prev,
           [groupId]: (prev[groupId] || 0) + 1
@@ -111,6 +115,8 @@ export function SocketProvider({ children }) {
   }, [user])
 
   const clearUnread = (userId) => {
+    // ✅ FIX: Set active chat so incoming messages don't increment
+    activeChatRef.current = userId
     setUnreadChats((prev) => {
       if (!prev[userId]) return prev
       const next = { ...prev }
@@ -120,12 +126,23 @@ export function SocketProvider({ children }) {
   }
 
   const clearUnreadGroup = (groupId) => {
+    // ✅ FIX: Set active group so incoming messages don't increment
+    activeGroupRef.current = groupId
     setUnreadGroups((prev) => {
       if (!prev[groupId]) return prev
       const next = { ...prev }
       delete next[groupId]
       return next
     })
+  }
+
+  // ✅ NEW: Call when leaving a chat/group page
+  const leaveChat = () => {
+    activeChatRef.current = null
+  }
+
+  const leaveGroup = () => {
+    activeGroupRef.current = null
   }
 
   return (
@@ -136,6 +153,8 @@ export function SocketProvider({ children }) {
       clearUnread,
       unreadGroups,
       clearUnreadGroup,
+      leaveChat,
+      leaveGroup,
     }}>
       {children}
     </SocketContext.Provider>

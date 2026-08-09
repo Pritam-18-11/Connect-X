@@ -43,12 +43,19 @@ async function areConnected(userId1, userId2) {
   return !!conn
 }
 
-// Removes member/admin IDs that no longer correspond to an existing User.
+// ✅ FIX: pruneDeletedMembers — batch query, N+1 solved
 async function pruneDeletedMembers(group) {
-  const allIds = [...new Set([...group.members.map((m) => m.toString())])]
+  const allMemberIds = group.members.map((m) => m.toString())
+  const allAdminIds = group.admins.map((a) => a.toString())
+  const allIds = [...new Set([...allMemberIds, ...allAdminIds])]
+
   if (allIds.length === 0) return group
 
-  const existingUsers = await User.find({ _id: { $in: allIds } }).select('_id')
+  const existingUsers = await User.find(
+    { _id: { $in: allIds } },
+    { _id: 1 }
+  ).lean()
+
   const existingIds = new Set(existingUsers.map((u) => u._id.toString()))
 
   const validMembers = group.members.filter((m) => existingIds.has(m.toString()))
@@ -66,6 +73,7 @@ async function pruneDeletedMembers(group) {
   return group
 }
 
+// ── POST /api/groups ───────────────────────────────────────────
 router.post('/', protect, async (req, res) => {
   try {
     const { name, description } = req.body
@@ -87,6 +95,8 @@ router.post('/', protect, async (req, res) => {
   }
 })
 
+// ── GET /api/groups ────────────────────────────────────────────
+// ✅ FIX: Last message fetch — single aggregation query instead of N queries
 router.get('/', protect, async (req, res) => {
   try {
     const groups = await Group.find({ members: req.user._id })
@@ -101,32 +111,52 @@ router.get('/', protect, async (req, res) => {
       }
     }
 
-    // Enrich each group with its last message + this user's unread count.
-    // Unread = messages sent after the user's last-seen timestamp for that group,
-    // approximated here via a lightweight "last read" check on GroupMessage.
-    const enriched = await Promise.all(
-      myGroups.map(async (group) => {
-        const lastMsg = await GroupMessage.findOne({ groupId: group._id })
-          .populate('senderId', 'name')
-          .sort({ createdAt: -1 })
-          .select('text messageType senderId createdAt')
+    if (myGroups.length === 0) return res.json([])
 
-        return {
-          ...group.toObject(),
-          lastMessage: lastMsg
-            ? {
-                text: lastMsg.text,
-                messageType: lastMsg.messageType,
-                senderName: lastMsg.senderId?.name || 'Unknown',
-                fromMe: lastMsg.senderId?._id?.toString() === req.user._id.toString(),
-                createdAt: lastMsg.createdAt,
-              }
-            : null,
-        }
-      })
-    )
+    const groupIds = myGroups.map((g) => g._id)
 
-    // Sort by most recent activity (last message time, or group creation time as fallback)
+    // ✅ Single aggregation — last message per group
+    const lastMessages = await GroupMessage.aggregate([
+      { $match: { groupId: { $in: groupIds } } },
+      { $sort: { createdAt: -1 } },
+      {
+        $group: {
+          _id: '$groupId',
+          text: { $first: '$text' },
+          messageType: { $first: '$messageType' },
+          senderId: { $first: '$senderId' },
+          createdAt: { $first: '$createdAt' },
+        },
+      },
+    ])
+
+    // Populate sender names for last messages
+    const senderIds = [...new Set(lastMessages.map((m) => m.senderId?.toString()).filter(Boolean))]
+    const senders = await User.find({ _id: { $in: senderIds } }, { _id: 1, name: 1 }).lean()
+    const senderMap = {}
+    senders.forEach((s) => { senderMap[s._id.toString()] = s.name })
+
+    const lastMsgMap = {}
+    lastMessages.forEach((m) => {
+      lastMsgMap[m._id.toString()] = m
+    })
+
+    const enriched = myGroups.map((group) => {
+      const lastMsg = lastMsgMap[group._id.toString()]
+      return {
+        ...group.toObject(),
+        lastMessage: lastMsg
+          ? {
+              text: lastMsg.text,
+              messageType: lastMsg.messageType,
+              senderName: senderMap[lastMsg.senderId?.toString()] || 'Unknown',
+              fromMe: lastMsg.senderId?.toString() === req.user._id.toString(),
+              createdAt: lastMsg.createdAt,
+            }
+          : null,
+      }
+    })
+
     enriched.sort((a, b) => {
       const aTime = a.lastMessage ? new Date(a.lastMessage.createdAt) : new Date(a.createdAt)
       const bTime = b.lastMessage ? new Date(b.lastMessage.createdAt) : new Date(b.createdAt)
@@ -410,7 +440,6 @@ router.get('/:id([0-9a-fA-F]{24})/messages', protect, async (req, res) => {
   }
 })
 
-// ── POST /api/groups/:id/send-voice — Group voice message ─────
 router.post('/:id([0-9a-fA-F]{24})/send-voice', protect, upload.single('audio'), async (req, res) => {
   try {
     const { duration } = req.body
@@ -454,9 +483,7 @@ router.post('/:id([0-9a-fA-F]{24})/send-voice', protect, upload.single('audio'),
     }
 
     const io = getIO()
-    if (io) {
-      io.to(`group_${req.params.id}`).emit('receive_group_message', msgData)
-    }
+    if (io) io.to(`group_${req.params.id}`).emit('receive_group_message', msgData)
 
     res.status(201).json(message)
   } catch (err) {
@@ -465,7 +492,6 @@ router.post('/:id([0-9a-fA-F]{24})/send-voice', protect, upload.single('audio'),
   }
 })
 
-// ── POST /api/groups/:id/send-image — Group image message ─────
 router.post('/:id([0-9a-fA-F]{24})/send-image', protect, upload.single('image'), async (req, res) => {
   try {
     const rawGroup = await Group.findById(req.params.id)
@@ -505,9 +531,7 @@ router.post('/:id([0-9a-fA-F]{24})/send-image', protect, upload.single('image'),
     }
 
     const io = getIO()
-    if (io) {
-      io.to(`group_${req.params.id}`).emit('receive_group_message', msgData)
-    }
+    if (io) io.to(`group_${req.params.id}`).emit('receive_group_message', msgData)
 
     res.status(201).json(message)
   } catch (err) {
@@ -516,7 +540,6 @@ router.post('/:id([0-9a-fA-F]{24})/send-image', protect, upload.single('image'),
   }
 })
 
-// ── PUT /api/groups/:id/settings — Toggle AI summary (creator only) ─
 router.put('/:id([0-9a-fA-F]{24})/settings', protect, async (req, res) => {
   try {
     const { aiSummaryEnabled } = req.body
@@ -539,7 +562,6 @@ router.put('/:id([0-9a-fA-F]{24})/settings', protect, async (req, res) => {
   }
 })
 
-// ── POST /api/groups/:id/summarize — AI summary of last 50 messages ─
 router.post('/:id([0-9a-fA-F]{24})/summarize', protect, async (req, res) => {
   try {
     const group = await Group.findById(req.params.id)
@@ -725,19 +747,15 @@ router.post('/:id([0-9a-fA-F]{24})/leave', protect, async (req, res) => {
 router.get('/:groupId/search/keyword', protect, async (req, res) => {
   try {
     const { q } = req.query
-
     const rawGroup = await Group.findById(req.params.groupId)
     if (!rawGroup) return res.status(404).json({ message: 'Group not found.' })
     if (!isMember(rawGroup, req.user._id)) {
       return res.status(403).json({ message: 'Not a member.' })
     }
-
     if (!q || !q.trim()) {
       return res.status(400).json({ message: 'Keyword is required.' })
     }
-
     const escaped = q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-
     const messages = await GroupMessage.find({
       groupId: req.params.groupId,
       text: { $regex: escaped, $options: 'i' },
@@ -745,7 +763,6 @@ router.get('/:groupId/search/keyword', protect, async (req, res) => {
       .populate('senderId', 'name avatarUrl')
       .sort({ createdAt: 1 })
       .limit(100)
-
     res.json(messages)
   } catch (err) {
     console.error('Keyword search error:', err.message)
@@ -756,21 +773,17 @@ router.get('/:groupId/search/keyword', protect, async (req, res) => {
 router.get('/:groupId/search/username', protect, async (req, res) => {
   try {
     const { userId } = req.query
-
     const rawGroup = await Group.findById(req.params.groupId)
     if (!rawGroup) return res.status(404).json({ message: 'Group not found.' })
     if (!isMember(rawGroup, req.user._id)) {
       return res.status(403).json({ message: 'Not a member.' })
     }
-
     if (!userId) {
       return res.status(400).json({ message: 'userId is required.' })
     }
-
     if (!isMember(rawGroup, userId)) {
       return res.status(400).json({ message: 'User is not a member of this group.' })
     }
-
     const messages = await GroupMessage.find({
       groupId: req.params.groupId,
       senderId: userId,
@@ -778,7 +791,6 @@ router.get('/:groupId/search/username', protect, async (req, res) => {
       .populate('senderId', 'name avatarUrl')
       .sort({ createdAt: 1 })
       .limit(200)
-
     res.json(messages)
   } catch (err) {
     console.error('Username search error:', err.message)
@@ -789,26 +801,21 @@ router.get('/:groupId/search/username', protect, async (req, res) => {
 router.get('/:groupId/search/date', protect, async (req, res) => {
   try {
     const { from, to } = req.query
-
     const rawGroup = await Group.findById(req.params.groupId)
     if (!rawGroup) return res.status(404).json({ message: 'Group not found.' })
     if (!isMember(rawGroup, req.user._id)) {
       return res.status(403).json({ message: 'Not a member.' })
     }
-
     if (!from || !to) {
       return res.status(400).json({ message: 'from and to dates are required.' })
     }
-
     const fromDate = new Date(from)
     fromDate.setHours(0, 0, 0, 0)
     const toDate = new Date(to)
     toDate.setHours(23, 59, 59, 999)
-
     if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
       return res.status(400).json({ message: 'Invalid date format.' })
     }
-
     const messages = await GroupMessage.find({
       groupId: req.params.groupId,
       createdAt: { $gte: fromDate, $lte: toDate },
@@ -816,7 +823,6 @@ router.get('/:groupId/search/date', protect, async (req, res) => {
       .populate('senderId', 'name avatarUrl')
       .sort({ createdAt: 1 })
       .limit(200)
-
     res.json(messages)
   } catch (err) {
     console.error('Date search error:', err.message)
