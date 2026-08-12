@@ -18,6 +18,7 @@ router.post('/request', protect, async (req, res) => {
       return res.status(400).json({ message: 'You cannot connect with yourself.' })
     }
 
+    // ✅ FIX: Check active connection
     const alreadyConnected = await Connection.findOne({
       $or: [
         { user1: senderId, user2: receiverId },
@@ -30,25 +31,37 @@ router.post('/request', protect, async (req, res) => {
       return res.status(400).json({ message: 'You are already connected with this user.' })
     }
 
-    const existing = await ConnectionRequest.findOne({
-      senderId,
-      receiverId,
-      status: 'pending',
+    // ✅ FIX: Check pending requests BOTH directions
+    const existingRequest = await ConnectionRequest.findOne({
+      $or: [
+        { senderId, receiverId, status: 'pending' },
+        { senderId: receiverId, receiverId: senderId, status: 'pending' },
+      ],
     })
-    if (existing) {
-      return res.status(400).json({ message: 'Connection request already sent.' })
+    if (existingRequest) {
+      return res.status(400).json({ message: 'A connection request already exists between you two.' })
     }
 
-    const invite = await InviteCode.findOne({
-      code: inviteCode.toUpperCase().trim(),
-      isUsed: false,
-    })
-    if (!invite || new Date() > invite.expiresAt) {
+    // ✅ FIX: Atomic invite code claim — race condition solved
+    const invite = await InviteCode.findOneAndUpdate(
+      {
+        code: inviteCode.toUpperCase().trim(),
+        isUsed: false,
+        expiresAt: { $gt: new Date() },
+      },
+      { $set: { isUsed: true } },
+      { new: true }
+    )
+
+    if (!invite) {
       return res.status(400).json({ message: 'Invite code is invalid or expired.' })
     }
 
-    invite.isUsed = true
-    await invite.save()
+    // ✅ FIX: Verify code belongs to the receiver
+    if (invite.userId.toString() !== receiverId.toString()) {
+      await InviteCode.findByIdAndUpdate(invite._id, { isUsed: false })
+      return res.status(400).json({ message: 'Invite code does not match this user.' })
+    }
 
     const receiver = await User.findById(receiverId)
     if (receiver?.autoRejectInvites) {
@@ -105,6 +118,26 @@ router.post('/approve/:id', protect, async (req, res) => {
       return res.status(403).json({ message: 'Not authorized.' })
     }
 
+    if (request.status !== 'pending') {
+      return res.status(400).json({ message: 'Request already processed.' })
+    }
+
+    // ✅ FIX: Duplicate connection guard before creating
+    const alreadyExists = await Connection.findOne({
+      $or: [
+        { user1: request.senderId, user2: request.receiverId },
+        { user1: request.receiverId, user2: request.senderId },
+      ],
+      isActive: true,
+      isRevoked: false,
+    })
+
+    if (alreadyExists) {
+      request.status = 'approved'
+      await request.save()
+      return res.json({ success: true, message: 'Already connected.' })
+    }
+
     request.status = 'approved'
     await request.save()
 
@@ -141,7 +174,7 @@ router.post('/reject/:id', protect, async (req, res) => {
 })
 
 // ── GET /api/connections/list ──────────────────────────────────
-// ✅ FIX: N+1 query problem solved — MongoDB aggregation use kora holo
+// ✅ N+1 query solved — single aggregation
 router.get('/list', protect, async (req, res) => {
   try {
     const userId = req.user._id
@@ -158,14 +191,13 @@ router.get('/list', protect, async (req, res) => {
 
     if (validConnections.length === 0) return res.json([])
 
-    // ✅ Get all other user IDs at once
     const otherUserIds = validConnections.map((conn) =>
       conn.user1._id.toString() === userId.toString()
         ? conn.user2._id
         : conn.user1._id
     )
 
-    // ✅ Single aggregation query for last messages — replaces N queries
+    // Single aggregation for last messages
     const lastMessages = await Message.aggregate([
       {
         $match: {
@@ -196,7 +228,7 @@ router.get('/list', protect, async (req, res) => {
       },
     ])
 
-    // ✅ Single aggregation query for unread counts — replaces N queries
+    // Single aggregation for unread counts
     const unreadCounts = await Message.aggregate([
       {
         $match: {
@@ -214,7 +246,6 @@ router.get('/list', protect, async (req, res) => {
       },
     ])
 
-    // ✅ Map results for O(1) lookup
     const lastMsgMap = {}
     lastMessages.forEach((m) => {
       lastMsgMap[m._id.toString()] = m
