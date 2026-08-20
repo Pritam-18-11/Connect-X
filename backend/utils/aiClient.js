@@ -76,7 +76,7 @@ async function askAboutConversation(messages, question) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile',
+          model: 'qwen/qwen3-32b',
           messages: [
             {
               role: 'system',
