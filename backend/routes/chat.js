@@ -1,6 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const multer = require('multer')
+const xss = require('xss')
 const Message = require('../models/Message')
 const Connection = require('../models/Connection')
 const Block = require('../models/Block')
@@ -10,6 +11,7 @@ const { getIO } = require('../socket/socketManager')
 const cloudinary = require('../utils/cloudinary')
 const { askAboutConversation, summarizeMessages } = require('../utils/aiClient')
 const { checkAndUpdateLimit } = require('../utils/messageLimit')
+const { encrypt, decrypt } = require('../utils/encryption')
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -28,7 +30,6 @@ async function areConnected(userId1, userId2) {
   return !!conn
 }
 
-// ✅ NEW: Shared block check helper
 async function isBlocked(userId1, userId2) {
   const block = await Block.findOne({
     $or: [
@@ -37,6 +38,13 @@ async function isBlocked(userId1, userId2) {
     ],
   })
   return !!block
+}
+
+function decryptMessages(messages) {
+  return messages.map((m) => {
+    const obj = m.toObject ? m.toObject() : m
+    return { ...obj, text: decrypt(obj.text) }
+  })
 }
 
 // ── GET /api/chat/stats/today ─────────────────────────────────
@@ -69,7 +77,8 @@ router.get('/:userId', protect, async (req, res) => {
       ],
       deletedFor: { $ne: req.user._id },
     }).sort({ createdAt: 1 })
-    res.json(messages)
+
+    res.json(decryptMessages(messages))
   } catch (error) {
     console.error('Get chat error:', error.message)
     res.status(500).json({ message: 'Failed to fetch messages.' })
@@ -80,23 +89,16 @@ router.get('/:userId', protect, async (req, res) => {
 router.put('/seen-all/:otherUserId', protect, async (req, res) => {
   try {
     const { otherUserId } = req.params
-
     const unseenMessages = await Message.find({
       senderId: otherUserId,
       receiverId: req.user._id,
       seen: false,
     }).select('_id')
 
-    if (unseenMessages.length === 0) {
-      return res.json({ success: true, count: 0 })
-    }
+    if (unseenMessages.length === 0) return res.json({ success: true, count: 0 })
 
     const messageIds = unseenMessages.map((m) => m._id)
-
-    await Message.updateMany(
-      { _id: { $in: messageIds } },
-      { seen: true }
-    )
+    await Message.updateMany({ _id: { $in: messageIds } }, { seen: true })
 
     const io = getIO()
     if (io) {
@@ -113,7 +115,7 @@ router.put('/seen-all/:otherUserId', protect, async (req, res) => {
   }
 })
 
-// ── POST /api/chat/:otherUserId/ask-ai ─────────────────────────
+// ── POST /api/chat/:otherUserId/ask-ai ────────────────────────
 router.post('/:otherUserId/ask-ai', protect, async (req, res) => {
   try {
     const { question } = req.body
@@ -153,17 +155,15 @@ router.post('/:otherUserId/ask-ai', protect, async (req, res) => {
     }
 
     const otherUser = await User.findById(req.params.otherUserId).select('name')
-
     const formatted = messages.map((m) => ({
       senderName:
         m.senderId.toString() === req.user._id.toString()
           ? req.user.name
           : otherUser?.name || 'Other',
-      text: m.text,
+      text: decrypt(m.text),
     }))
 
-    const answer = await askAboutConversation(formatted, question.trim())
-
+    const answer = await askAboutConversation(formatted, xss(question.trim()))
     res.json({ answer })
   } catch (error) {
     console.error('Ask AI error:', error.message)
@@ -171,7 +171,7 @@ router.post('/:otherUserId/ask-ai', protect, async (req, res) => {
   }
 })
 
-// ── POST /api/chat/:otherUserId/summarize-unread ───────────────
+// ── POST /api/chat/:otherUserId/summarize-unread ──────────────
 router.post('/:otherUserId/summarize-unread', protect, async (req, res) => {
   try {
     const { messageIds } = req.body
@@ -213,14 +213,12 @@ router.post('/:otherUserId/summarize-unread', protect, async (req, res) => {
     }
 
     const otherUser = await User.findById(req.params.otherUserId).select('name')
-
     const formatted = unreadMessages.map((m) => ({
       senderName: otherUser?.name || 'Other',
-      text: m.text,
+      text: decrypt(m.text),
     }))
 
     const summary = await summarizeMessages(formatted)
-
     res.json({ summary, messageCount: unreadMessages.length })
   } catch (error) {
     console.error('Summarize unread error:', error.message)
@@ -236,7 +234,6 @@ router.post('/send', protect, async (req, res) => {
       return res.status(400).json({ message: 'Message cannot be empty.' })
     }
 
-    // ✅ FIX: Block check added
     const blocked = await isBlocked(req.user._id, receiverId)
     if (blocked) {
       return res.status(403).json({ message: 'Cannot send message to this user.' })
@@ -247,19 +244,20 @@ router.post('/send', protect, async (req, res) => {
       return res.status(403).json({ message: 'You are not connected with this user.' })
     }
 
-    // ✅ FIX: Using shared utility
     const limitCheck = await checkAndUpdateLimit(req.user._id, receiverId)
     if (!limitCheck.allowed) {
       return res.status(429).json({ message: limitCheck.message })
     }
 
+    const cleanText = xss(text.trim())
     const message = await Message.create({
       senderId: req.user._id,
       receiverId,
-      text: text.trim(),
+      text: encrypt(cleanText),
       messageType: 'text',
     })
-    res.status(201).json(message)
+
+    res.status(201).json({ ...message.toObject(), text: cleanText })
   } catch (error) {
     console.error('Send message error:', error.message)
     res.status(500).json({ message: 'Failed to send message.' })
@@ -273,16 +271,12 @@ router.post('/send-voice', protect, upload.single('audio'), async (req, res) => 
     if (!req.file) return res.status(400).json({ message: 'No audio file provided.' })
     if (!receiverId) return res.status(400).json({ message: 'receiverId is required.' })
 
-    // ✅ FIX: Block check added
     const blocked = await isBlocked(req.user._id, receiverId)
-    if (blocked) {
-      return res.status(403).json({ message: 'Cannot send message to this user.' })
-    }
+    if (blocked) return res.status(403).json({ message: 'Cannot send message to this user.' })
 
     const connected = await areConnected(req.user._id, receiverId)
     if (!connected) return res.status(403).json({ message: 'You are not connected with this user.' })
 
-    // ✅ FIX: Using shared utility
     const limitCheck = await checkAndUpdateLimit(req.user._id, receiverId)
     if (!limitCheck.allowed) return res.status(429).json({ message: limitCheck.message })
 
@@ -332,16 +326,12 @@ router.post('/send-image', protect, upload.single('image'), async (req, res) => 
     if (!req.file) return res.status(400).json({ message: 'No image file provided.' })
     if (!receiverId) return res.status(400).json({ message: 'receiverId is required.' })
 
-    // ✅ FIX: Block check added
     const blocked = await isBlocked(req.user._id, receiverId)
-    if (blocked) {
-      return res.status(403).json({ message: 'Cannot send message to this user.' })
-    }
+    if (blocked) return res.status(403).json({ message: 'Cannot send message to this user.' })
 
     const connected = await areConnected(req.user._id, receiverId)
     if (!connected) return res.status(403).json({ message: 'You are not connected with this user.' })
 
-    // ✅ FIX: Using shared utility
     const limitCheck = await checkAndUpdateLimit(req.user._id, receiverId)
     if (!limitCheck.allowed) return res.status(429).json({ message: limitCheck.message })
 
@@ -382,13 +372,11 @@ router.post('/send-image', protect, upload.single('image'), async (req, res) => 
 })
 
 // ── PUT /api/chat/seen/:messageId ─────────────────────────────
-// ✅ FIX: Receiver authorization added
 router.put('/seen/:messageId', protect, async (req, res) => {
   try {
     const message = await Message.findById(req.params.messageId)
     if (!message) return res.status(404).json({ message: 'Message not found.' })
 
-    // Only the actual receiver can mark as seen
     if (message.receiverId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Not authorized.' })
     }
@@ -420,7 +408,8 @@ router.put('/edit/:messageId', protect, async (req, res) => {
       return res.status(400).json({ message: 'Cannot edit a deleted message.' })
     }
 
-    message.text = text.trim()
+    const cleanText = xss(text.trim())
+    message.text = encrypt(cleanText)
     message.isEdited = true
     await message.save()
 
@@ -433,18 +422,18 @@ router.put('/edit/:messageId', protect, async (req, res) => {
     if (io) {
       io.to(otherUserId).emit('message_edited', {
         messageId: message._id,
-        text: message.text,
+        text: cleanText,
       })
     }
 
-    res.json({ success: true, message })
+    res.json({ success: true, message: { ...message.toObject(), text: cleanText } })
   } catch (error) {
     console.error('Edit message error:', error.message)
     res.status(500).json({ message: 'Failed to edit message.' })
   }
 })
 
-// ── DELETE /api/chat/:messageId?for=me|everyone ───────────────
+// ── DELETE /api/chat/:messageId ───────────────────────────────
 router.delete('/:messageId', protect, async (req, res) => {
   try {
     const { for: deleteFor } = req.query

@@ -3,6 +3,8 @@ const express = require('express')
 const cors = require('cors')
 const http = require('http')
 const multer = require('multer')
+const helmet = require('helmet')
+const mongoSanitize = require('express-mongo-sanitize')
 const connectDB = require('./config/db')
 const initSocket = require('./socket')
 const socketManager = require('./socket/socketManager')
@@ -12,8 +14,19 @@ const server = http.createServer(app)
 
 connectDB()
 
-app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:3000', credentials: true }))
-app.use(express.json())
+// ✅ Security headers
+app.use(helmet())
+app.use(helmet.hsts({ maxAge: 31536000, includeSubDomains: true }))
+
+app.use(cors({
+  origin: process.env.CLIENT_URL || 'http://localhost:3000',
+  credentials: true,
+}))
+
+app.use(express.json({ limit: '10mb' }))
+
+// ✅ NoSQL injection prevent
+app.use(mongoSanitize())
 
 app.use('/api/auth', require('./routes/auth'))
 app.use('/api/invite', require('./routes/invite'))
@@ -28,7 +41,6 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'PrivaChat backend is running' })
 })
 
-// Multer / upload error handler — catches file-size/type errors from any route
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
@@ -43,7 +55,6 @@ app.use((err, req, res, next) => {
   next()
 })
 
-// Initialize Socket.IO and store io instance for use in routes
 const io = initSocket(server)
 socketManager.setIO(io)
 

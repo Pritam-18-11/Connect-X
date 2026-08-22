@@ -1,5 +1,6 @@
 const { Server } = require('socket.io')
 const jwt = require('jsonwebtoken')
+const xss = require('xss')
 const User = require('../models/User')
 const Message = require('../models/Message')
 const Connection = require('../models/Connection')
@@ -8,6 +9,7 @@ const MessageLimit = require('../models/MessageLimit')
 const Group = require('../models/Group')
 const GroupMessage = require('../models/GroupMessage')
 const { checkAndUpdateLimit } = require('../utils/messageLimit')
+const { encrypt, decrypt } = require('../utils/encryption')
 
 const onlineUsers = new Map()
 
@@ -49,19 +51,16 @@ function initSocket(server) {
 
     try {
       const groups = await Group.find({ members: socket.user._id })
-      groups.forEach((group) => {
-        socket.join(`group_${group._id}`)
-      })
+      groups.forEach((group) => socket.join(`group_${group._id}`))
     } catch (err) {
       console.error('Error joining group rooms:', err.message)
     }
 
-    // ── Private Message (text) ─────────────────────────────────
+    // ── Private Message ───────────────────────────────────────
     socket.on('send_message', async ({ receiverId, text }) => {
       try {
         if (!text || !text.trim()) return
 
-        // ✅ FIX: Block check added
         const blockExists = await Block.findOne({
           $or: [
             { blockedBy: userId, blockedUser: receiverId },
@@ -89,10 +88,11 @@ function initSocket(server) {
           return
         }
 
+        const cleanText = xss(text.trim())
         const message = await Message.create({
           senderId: userId,
           receiverId,
-          text: text.trim(),
+          text: encrypt(cleanText),
           messageType: 'text',
         })
 
@@ -100,7 +100,7 @@ function initSocket(server) {
           _id: message._id,
           senderId: userId,
           receiverId,
-          text: message.text,
+          text: cleanText,
           messageType: 'text',
           seen: false,
           isEdited: false,
@@ -124,13 +124,11 @@ function initSocket(server) {
     })
 
     // ── Mark Seen ─────────────────────────────────────────────
-    // ✅ FIX: Authorization added — only actual receiver can mark seen
     socket.on('mark_seen', async ({ messageId, senderId }) => {
       try {
         const message = await Message.findById(messageId)
         if (!message) return
         if (message.receiverId.toString() !== userId) return
-
         await Message.findByIdAndUpdate(messageId, { seen: true })
         io.to(senderId).emit('message_seen', { messageId })
       } catch (err) {
@@ -148,13 +146,9 @@ function initSocket(server) {
     })
 
     // ── Group: Join room ──────────────────────────────────────
-    // ✅ FIX: Member verification added
     socket.on('join_group', async ({ groupId }) => {
       try {
-        const group = await Group.findOne({
-          _id: groupId,
-          members: socket.user._id,
-        })
+        const group = await Group.findOne({ _id: groupId, members: socket.user._id })
         if (!group) {
           socket.emit('error_message', { message: 'You are not a member of this group.' })
           return
@@ -165,7 +159,7 @@ function initSocket(server) {
       }
     })
 
-    // ── Group: Send message (text) ─────────────────────────────
+    // ── Group: Send message ───────────────────────────────────
     socket.on('group_send_message', async ({ groupId, text }) => {
       try {
         if (!text || !text.trim()) return
@@ -174,10 +168,11 @@ function initSocket(server) {
         if (!group) return
         if (!group.members.some((m) => m.toString() === userId)) return
 
+        const cleanText = xss(text.trim())
         const message = await GroupMessage.create({
           groupId,
           senderId: userId,
-          text: text.trim(),
+          text: encrypt(cleanText),
           messageType: 'text',
         })
 
@@ -185,7 +180,7 @@ function initSocket(server) {
           _id: message._id,
           groupId,
           senderId: { _id: userId, name: socket.user.name },
-          text: message.text,
+          text: cleanText,
           messageType: 'text',
           isEdited: false,
           createdAt: message.createdAt,
@@ -208,13 +203,14 @@ function initSocket(server) {
         if (message.isDeletedForEveryone) return
         if (message.messageType === 'voice') return
 
-        message.text = text.trim()
+        const cleanText = xss(text.trim())
+        message.text = encrypt(cleanText)
         message.isEdited = true
         await message.save()
 
         io.to(`group_${message.groupId}`).emit('group_message_edited', {
           messageId: message._id,
-          text: message.text,
+          text: cleanText,
         })
       } catch (err) {
         console.error('Group edit message error:', err.message)
@@ -244,16 +240,13 @@ function initSocket(server) {
           }
 
           const senderUserId = message.senderId.toString()
-
           io.to(groupRoom).except(senderUserId).emit('group_message_deleted', {
             messageId: message._id,
           })
-
           io.to(senderUserId).emit('group_message_deleted_by_creator', {
             messageId: message._id,
             creatorName: socket.user.name,
           })
-
           await GroupMessage.findByIdAndDelete(message._id)
           return
         }

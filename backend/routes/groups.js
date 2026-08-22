@@ -1,6 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const multer = require('multer')
+const xss = require('xss')
 const Group = require('../models/Group')
 const GroupInvitation = require('../models/GroupInvitation')
 const GroupJoinRequest = require('../models/GroupJoinRequest')
@@ -12,6 +13,7 @@ const { protect } = require('../middleware/auth')
 const { getIO } = require('../socket/socketManager')
 const cloudinary = require('../utils/cloudinary')
 const { summarizeMessages } = require('../utils/aiClient')
+const { encrypt, decrypt } = require('../utils/encryption')
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } })
 
@@ -81,8 +83,8 @@ router.post('/', protect, async (req, res) => {
       return res.status(400).json({ message: 'Group name is required.' })
     }
     const group = await Group.create({
-      name: name.trim(),
-      description: description?.trim() || '',
+      name: xss(name.trim()),
+      description: xss(description?.trim() || ''),
       createdBy: req.user._id,
       admins: [req.user._id],
       members: [req.user._id],
@@ -96,7 +98,6 @@ router.post('/', protect, async (req, res) => {
 })
 
 // ── GET /api/groups ────────────────────────────────────────────
-// ✅ FIX: Last message fetch — single aggregation query instead of N queries
 router.get('/', protect, async (req, res) => {
   try {
     const groups = await Group.find({ members: req.user._id })
@@ -130,16 +131,13 @@ router.get('/', protect, async (req, res) => {
       },
     ])
 
-    // Populate sender names for last messages
     const senderIds = [...new Set(lastMessages.map((m) => m.senderId?.toString()).filter(Boolean))]
     const senders = await User.find({ _id: { $in: senderIds } }, { _id: 1, name: 1 }).lean()
     const senderMap = {}
     senders.forEach((s) => { senderMap[s._id.toString()] = s.name })
 
     const lastMsgMap = {}
-    lastMessages.forEach((m) => {
-      lastMsgMap[m._id.toString()] = m
-    })
+    lastMessages.forEach((m) => { lastMsgMap[m._id.toString()] = m })
 
     const enriched = myGroups.map((group) => {
       const lastMsg = lastMsgMap[group._id.toString()]
@@ -147,7 +145,8 @@ router.get('/', protect, async (req, res) => {
         ...group.toObject(),
         lastMessage: lastMsg
           ? {
-              text: lastMsg.text,
+              // ✅ Decrypt last message text for preview
+              text: decrypt(lastMsg.text),
               messageType: lastMsg.messageType,
               senderName: senderMap[lastMsg.senderId?.toString()] || 'Unknown',
               fromMe: lastMsg.senderId?.toString() === req.user._id.toString(),
@@ -170,6 +169,7 @@ router.get('/', protect, async (req, res) => {
   }
 })
 
+// ── GET /api/groups/my-invitations ────────────────────────────
 router.get('/my-invitations', protect, async (req, res) => {
   try {
     const invitations = await GroupInvitation.find({
@@ -186,6 +186,7 @@ router.get('/my-invitations', protect, async (req, res) => {
   }
 })
 
+// ── GET /api/groups/pending-admin-tasks ───────────────────────
 router.get('/pending-admin-tasks', protect, async (req, res) => {
   try {
     const adminGroups = await Group.find({ admins: req.user._id })
@@ -211,6 +212,7 @@ router.get('/pending-admin-tasks', protect, async (req, res) => {
   }
 })
 
+// ── GET /api/groups/join/:code ─────────────────────────────────
 router.get('/join/:code', protect, async (req, res) => {
   try {
     const group = await Group.findOne({ inviteCode: req.params.code })
@@ -245,6 +247,7 @@ router.get('/join/:code', protect, async (req, res) => {
   }
 })
 
+// ── POST /api/groups/join/:code ────────────────────────────────
 router.post('/join/:code', protect, async (req, res) => {
   try {
     const group = await Group.findOne({ inviteCode: req.params.code })
@@ -276,6 +279,7 @@ router.post('/join/:code', protect, async (req, res) => {
   }
 })
 
+// ── POST /api/groups/invitations/:id/approve ──────────────────
 router.post('/invitations/:id/approve', protect, async (req, res) => {
   try {
     const invitation = await GroupInvitation.findById(req.params.id)
@@ -295,6 +299,7 @@ router.post('/invitations/:id/approve', protect, async (req, res) => {
   }
 })
 
+// ── POST /api/groups/invitations/:id/reject ───────────────────
 router.post('/invitations/:id/reject', protect, async (req, res) => {
   try {
     const invitation = await GroupInvitation.findById(req.params.id)
@@ -311,6 +316,7 @@ router.post('/invitations/:id/reject', protect, async (req, res) => {
   }
 })
 
+// ── POST /api/groups/join-requests/:id/approve ────────────────
 router.post('/join-requests/:id/approve', protect, async (req, res) => {
   try {
     const joinRequest = await GroupJoinRequest.findById(req.params.id)
@@ -331,6 +337,7 @@ router.post('/join-requests/:id/approve', protect, async (req, res) => {
   }
 })
 
+// ── POST /api/groups/join-requests/:id/reject ─────────────────
 router.post('/join-requests/:id/reject', protect, async (req, res) => {
   try {
     const joinRequest = await GroupJoinRequest.findById(req.params.id)
@@ -348,6 +355,7 @@ router.post('/join-requests/:id/reject', protect, async (req, res) => {
   }
 })
 
+// ── POST /api/groups/admin-actions/:id/approve ────────────────
 router.post('/admin-actions/:id/approve', protect, async (req, res) => {
   try {
     const actionReq = await AdminActionRequest.findById(req.params.id)
@@ -374,6 +382,7 @@ router.post('/admin-actions/:id/approve', protect, async (req, res) => {
   }
 })
 
+// ── POST /api/groups/admin-actions/:id/reject ─────────────────
 router.post('/admin-actions/:id/reject', protect, async (req, res) => {
   try {
     const actionReq = await AdminActionRequest.findById(req.params.id)
@@ -391,6 +400,7 @@ router.post('/admin-actions/:id/reject', protect, async (req, res) => {
   }
 })
 
+// ── GET /api/groups/:id ────────────────────────────────────────
 router.get('/:id([0-9a-fA-F]{24})', protect, async (req, res) => {
   try {
     const rawGroup = await Group.findById(req.params.id)
@@ -417,6 +427,7 @@ router.get('/:id([0-9a-fA-F]{24})', protect, async (req, res) => {
   }
 })
 
+// ── GET /api/groups/:id/messages ──────────────────────────────
 router.get('/:id([0-9a-fA-F]{24})/messages', protect, async (req, res) => {
   try {
     const rawGroup = await Group.findById(req.params.id)
@@ -433,13 +444,20 @@ router.get('/:id([0-9a-fA-F]{24})/messages', protect, async (req, res) => {
       .populate('senderId', 'name avatarUrl')
       .sort({ createdAt: 1 })
 
-    res.json(messages)
+    // ✅ Decrypt all messages before sending to frontend
+    const decrypted = messages.map((m) => ({
+      ...m.toObject(),
+      text: decrypt(m.text),
+    }))
+
+    res.json(decrypted)
   } catch (err) {
     console.error('Get group messages error:', err.message)
     res.status(500).json({ message: 'Failed to fetch messages.' })
   }
 })
 
+// ── POST /api/groups/:id/send-voice ───────────────────────────
 router.post('/:id([0-9a-fA-F]{24})/send-voice', protect, upload.single('audio'), async (req, res) => {
   try {
     const { duration } = req.body
@@ -449,7 +467,6 @@ router.post('/:id([0-9a-fA-F]{24})/send-voice', protect, upload.single('audio'),
     if (!isMember(rawGroup, req.user._id)) {
       return res.status(403).json({ message: 'Not a member.' })
     }
-
     if (!req.file) {
       return res.status(400).json({ message: 'No audio file provided.' })
     }
@@ -492,6 +509,7 @@ router.post('/:id([0-9a-fA-F]{24})/send-voice', protect, upload.single('audio'),
   }
 })
 
+// ── POST /api/groups/:id/send-image ───────────────────────────
 router.post('/:id([0-9a-fA-F]{24})/send-image', protect, upload.single('image'), async (req, res) => {
   try {
     const rawGroup = await Group.findById(req.params.id)
@@ -500,7 +518,6 @@ router.post('/:id([0-9a-fA-F]{24})/send-image', protect, upload.single('image'),
     if (!isMember(rawGroup, req.user._id)) {
       return res.status(403).json({ message: 'Not a member.' })
     }
-
     if (!req.file) {
       return res.status(400).json({ message: 'No image file provided.' })
     }
@@ -540,6 +557,7 @@ router.post('/:id([0-9a-fA-F]{24})/send-image', protect, upload.single('image'),
   }
 })
 
+// ── PUT /api/groups/:id/settings ──────────────────────────────
 router.put('/:id([0-9a-fA-F]{24})/settings', protect, async (req, res) => {
   try {
     const { aiSummaryEnabled } = req.body
@@ -562,6 +580,7 @@ router.put('/:id([0-9a-fA-F]{24})/settings', protect, async (req, res) => {
   }
 })
 
+// ── POST /api/groups/:id/summarize ────────────────────────────
 router.post('/:id([0-9a-fA-F]{24})/summarize', protect, async (req, res) => {
   try {
     const group = await Group.findById(req.params.id)
@@ -570,7 +589,6 @@ router.post('/:id([0-9a-fA-F]{24})/summarize', protect, async (req, res) => {
     if (!isMember(group, req.user._id)) {
       return res.status(403).json({ message: 'Not a member.' })
     }
-
     if (!group.aiSummaryEnabled) {
       return res.status(403).json({ message: 'AI summarization is disabled for this group.' })
     }
@@ -585,13 +603,14 @@ router.post('/:id([0-9a-fA-F]{24})/summarize', protect, async (req, res) => {
     }
 
     const chronological = messages.reverse()
+
+    // ✅ Decrypt before sending to AI
     const formatted = chronological.map((m) => ({
       senderName: m.senderId?.name || 'Unknown',
-      text: m.text,
+      text: decrypt(m.text),
     }))
 
     const summary = await summarizeMessages(formatted)
-
     res.json({ summary, messageCount: chronological.length })
   } catch (err) {
     console.error('Summarize error:', err.message)
@@ -599,6 +618,7 @@ router.post('/:id([0-9a-fA-F]{24})/summarize', protect, async (req, res) => {
   }
 })
 
+// ── POST /api/groups/:id/invite ───────────────────────────────
 router.post('/:id([0-9a-fA-F]{24})/invite', protect, async (req, res) => {
   try {
     const { targetUserId } = req.body
@@ -638,6 +658,7 @@ router.post('/:id([0-9a-fA-F]{24})/invite', protect, async (req, res) => {
   }
 })
 
+// ── POST /api/groups/:id/admin-action ─────────────────────────
 router.post('/:id([0-9a-fA-F]{24})/admin-action', protect, async (req, res) => {
   try {
     const { targetUserId, actionType } = req.body
@@ -647,7 +668,6 @@ router.post('/:id([0-9a-fA-F]{24})/admin-action', protect, async (req, res) => {
     if (!isAdmin(group, req.user._id)) {
       return res.status(403).json({ message: 'Admins only.' })
     }
-
     if (!['remove-member', 'make-admin'].includes(actionType)) {
       return res.status(400).json({ message: 'Invalid action type.' })
     }
@@ -695,6 +715,7 @@ router.post('/:id([0-9a-fA-F]{24})/admin-action', protect, async (req, res) => {
   }
 })
 
+// ── POST /api/groups/:id/demote/:userId ───────────────────────
 router.post('/:id([0-9a-fA-F]{24})/demote/:userId', protect, async (req, res) => {
   try {
     const group = await Group.findById(req.params.id)
@@ -721,6 +742,7 @@ router.post('/:id([0-9a-fA-F]{24})/demote/:userId', protect, async (req, res) =>
   }
 })
 
+// ── POST /api/groups/:id/leave ────────────────────────────────
 router.post('/:id([0-9a-fA-F]{24})/leave', protect, async (req, res) => {
   try {
     const group = await Group.findById(req.params.id)
@@ -744,6 +766,7 @@ router.post('/:id([0-9a-fA-F]{24})/leave', protect, async (req, res) => {
   }
 })
 
+// ── GET /api/groups/:groupId/search/keyword ───────────────────
 router.get('/:groupId/search/keyword', protect, async (req, res) => {
   try {
     const { q } = req.query
@@ -755,21 +778,29 @@ router.get('/:groupId/search/keyword', protect, async (req, res) => {
     if (!q || !q.trim()) {
       return res.status(400).json({ message: 'Keyword is required.' })
     }
-    const escaped = q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+    // ✅ Fetch all text messages and search after decrypt
     const messages = await GroupMessage.find({
       groupId: req.params.groupId,
-      text: { $regex: escaped, $options: 'i' },
+      messageType: 'text',
     })
       .populate('senderId', 'name avatarUrl')
       .sort({ createdAt: 1 })
-      .limit(100)
-    res.json(messages)
+
+    const keyword = xss(q.trim()).toLowerCase()
+    const matched = messages
+      .map((m) => ({ ...m.toObject(), text: decrypt(m.text) }))
+      .filter((m) => m.text.toLowerCase().includes(keyword))
+      .slice(0, 100)
+
+    res.json(matched)
   } catch (err) {
     console.error('Keyword search error:', err.message)
     res.status(500).json({ message: 'Search failed.' })
   }
 })
 
+// ── GET /api/groups/:groupId/search/username ──────────────────
 router.get('/:groupId/search/username', protect, async (req, res) => {
   try {
     const { userId } = req.query
@@ -784,6 +815,7 @@ router.get('/:groupId/search/username', protect, async (req, res) => {
     if (!isMember(rawGroup, userId)) {
       return res.status(400).json({ message: 'User is not a member of this group.' })
     }
+
     const messages = await GroupMessage.find({
       groupId: req.params.groupId,
       senderId: userId,
@@ -791,13 +823,17 @@ router.get('/:groupId/search/username', protect, async (req, res) => {
       .populate('senderId', 'name avatarUrl')
       .sort({ createdAt: 1 })
       .limit(200)
-    res.json(messages)
+
+    // ✅ Decrypt messages
+    const decrypted = messages.map((m) => ({ ...m.toObject(), text: decrypt(m.text) }))
+    res.json(decrypted)
   } catch (err) {
     console.error('Username search error:', err.message)
     res.status(500).json({ message: 'Search failed.' })
   }
 })
 
+// ── GET /api/groups/:groupId/search/date ──────────────────────
 router.get('/:groupId/search/date', protect, async (req, res) => {
   try {
     const { from, to } = req.query
@@ -809,13 +845,16 @@ router.get('/:groupId/search/date', protect, async (req, res) => {
     if (!from || !to) {
       return res.status(400).json({ message: 'from and to dates are required.' })
     }
+
     const fromDate = new Date(from)
     fromDate.setHours(0, 0, 0, 0)
     const toDate = new Date(to)
     toDate.setHours(23, 59, 59, 999)
+
     if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
       return res.status(400).json({ message: 'Invalid date format.' })
     }
+
     const messages = await GroupMessage.find({
       groupId: req.params.groupId,
       createdAt: { $gte: fromDate, $lte: toDate },
@@ -823,7 +862,10 @@ router.get('/:groupId/search/date', protect, async (req, res) => {
       .populate('senderId', 'name avatarUrl')
       .sort({ createdAt: 1 })
       .limit(200)
-    res.json(messages)
+
+    // ✅ Decrypt messages
+    const decrypted = messages.map((m) => ({ ...m.toObject(), text: decrypt(m.text) }))
+    res.json(decrypted)
   } catch (err) {
     console.error('Date search error:', err.message)
     res.status(500).json({ message: 'Search failed.' })
