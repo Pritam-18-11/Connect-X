@@ -31,8 +31,7 @@ async function summarizeMessages(messages) {
           messages: [
             {
               role: 'system',
-              content:
-                'You are a helpful assistant that summarizes chat conversations concisely. Provide a short, clear summary in a few bullet points covering the main topics discussed, any decisions made, and any pending action items. Keep it brief and easy to skim.',
+              content: 'You are a helpful assistant that answers questions about a private conversation. Answer based ONLY on what was actually discussed in the chat. Keep your answer short and to the point — 2 to 4 sentences maximum. Do not add extra information, explanations, or examples beyond what was mentioned in the conversation. If the topic was not discussed, say so in one sentence.',
             },
             {
               role: 'user',
