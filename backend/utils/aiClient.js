@@ -27,7 +27,7 @@ async function summarizeMessages(messages) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'qwen/qwen3-32b',
+          model: 'openai/gpt-oss-120b',
           messages: [
             {
               role: 'system',
@@ -76,7 +76,7 @@ async function askAboutConversation(messages, question) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'qwen/qwen3-32b',
+          model: 'openai/gpt-oss-120b',
           messages: [
             {
               role: 'system',
