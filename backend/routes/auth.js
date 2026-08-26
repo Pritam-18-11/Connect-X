@@ -21,20 +21,17 @@ const cloudinary = require('../utils/cloudinary')
 const router = express.Router()
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  limits: { fileSize: 5 * 1024 * 1024 },
 })
 
-// Helper: generate JWT token
 const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET, {
-    expiresIn: '7d',
-  })
+  return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '7d' })
 }
 
 // ─── POST /api/auth/register ──────────────────────────────────
 router.post('/register', authLimiter, async (req, res) => {
   try {
-    const { name, email, password } = req.body
+    const { name, email, password, username } = req.body
 
     if (!name || !email || !password) {
       return res.status(400).json({ message: 'Please fill in all fields.' })
@@ -49,7 +46,32 @@ router.post('/register', authLimiter, async (req, res) => {
       return res.status(400).json({ message: 'An account with this email already exists.' })
     }
 
-    const user = await User.create({ name, email, password })
+    // ✅ Username validation — case insensitive unique check
+    if (username) {
+      if (username.length < 3 || username.length > 20) {
+        return res.status(400).json({ message: 'Username must be 3-20 characters.' })
+      }
+      if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+        return res.status(400).json({
+          message: 'Username can only contain letters, numbers, and underscore.',
+        })
+      }
+      const existingUsername = await User.findOne({
+        username: { $regex: new RegExp(`^${username}$`, 'i') },
+      })
+      if (existingUsername) {
+        return res.status(400).json({
+          message: `Username "${username}" is already taken. Please choose another.`,
+        })
+      }
+    }
+
+    const user = await User.create({
+      name,
+      email,
+      password,
+      ...(username ? { username: username.toLowerCase() } : {}),
+    })
 
     res.status(201).json({
       message: 'Account created successfully. Please log in.',
@@ -85,6 +107,7 @@ router.post('/login', authLimiter, async (req, res) => {
         id: user._id,
         name: user.name,
         email: user.email,
+        username: user.username || null,
         createdAt: user.createdAt,
         avatarUrl: user.avatarUrl,
         autoRejectInvites: user.autoRejectInvites,
@@ -103,6 +126,7 @@ router.get('/me', protect, async (req, res) => {
     id: req.user._id,
     name: req.user.name,
     email: req.user.email,
+    username: req.user.username || null,
     createdAt: req.user.createdAt,
     avatarUrl: req.user.avatarUrl,
     autoRejectInvites: req.user.autoRejectInvites,
@@ -110,10 +134,10 @@ router.get('/me', protect, async (req, res) => {
   })
 })
 
-// ─── PUT /api/auth/me — Update profile ─────────────────────────
+// ─── PUT /api/auth/me ─────────────────────────────────────────
 router.put('/me', protect, async (req, res) => {
   try {
-    const { name, email, password, autoRejectInvites, notificationsEnabled } = req.body
+    const { name, email, password, username, autoRejectInvites, notificationsEnabled } = req.body
     const user = await User.findById(req.user._id)
 
     if (!user) {
@@ -136,11 +160,36 @@ router.put('/me', protect, async (req, res) => {
       user.email = newEmail
     }
 
+    // ✅ Username update with case-insensitive uniqueness check
+    if (username !== undefined) {
+      const newUsername = username.trim().toLowerCase()
+      if (newUsername !== (user.username || '')) {
+        if (newUsername.length < 3 || newUsername.length > 20) {
+          return res.status(400).json({ message: 'Username must be 3-20 characters.' })
+        }
+        if (!/^[a-zA-Z0-9_]+$/.test(newUsername)) {
+          return res.status(400).json({
+            message: 'Username can only contain letters, numbers, and underscore.',
+          })
+        }
+        const existingUsername = await User.findOne({
+          username: { $regex: new RegExp(`^${newUsername}$`, 'i') },
+          _id: { $ne: req.user._id },
+        })
+        if (existingUsername) {
+          return res.status(400).json({
+            message: `Username "${newUsername}" is already taken. Please choose another.`,
+          })
+        }
+        user.username = newUsername
+      }
+    }
+
     if (password) {
       if (password.length < 6) {
         return res.status(400).json({ message: 'Password must be at least 6 characters.' })
       }
-      user.password = password // pre-save hook will hash it
+      user.password = password
     }
 
     if (typeof autoRejectInvites === 'boolean') {
@@ -159,6 +208,7 @@ router.put('/me', protect, async (req, res) => {
         id: user._id,
         name: user.name,
         email: user.email,
+        username: user.username || null,
         createdAt: user.createdAt,
         avatarUrl: user.avatarUrl,
         autoRejectInvites: user.autoRejectInvites,
@@ -171,7 +221,7 @@ router.put('/me', protect, async (req, res) => {
   }
 })
 
-// ─── PUT /api/auth/me/avatar — Upload/update profile photo ────
+// ─── PUT /api/auth/me/avatar ──────────────────────────────────
 router.put('/me/avatar', protect, upload.single('avatar'), async (req, res) => {
   try {
     if (!req.file) {
@@ -195,6 +245,7 @@ router.put('/me/avatar', protect, upload.single('avatar'), async (req, res) => {
         id: user._id,
         name: user.name,
         email: user.email,
+        username: user.username || null,
         createdAt: user.createdAt,
         avatarUrl: user.avatarUrl,
         autoRejectInvites: user.autoRejectInvites,
@@ -207,7 +258,7 @@ router.put('/me/avatar', protect, upload.single('avatar'), async (req, res) => {
   }
 })
 
-// ─── DELETE /api/auth/me/avatar — Remove profile photo ─────────
+// ─── DELETE /api/auth/me/avatar ───────────────────────────────
 router.delete('/me/avatar', protect, async (req, res) => {
   try {
     const user = await User.findById(req.user._id)
@@ -220,7 +271,7 @@ router.delete('/me/avatar', protect, async (req, res) => {
   }
 })
 
-// ─── DELETE /api/auth/me — Delete account + cascade cleanup ───
+// ─── DELETE /api/auth/me ──────────────────────────────────────
 router.delete('/me', protect, async (req, res) => {
   try {
     const userId = req.user._id

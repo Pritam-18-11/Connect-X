@@ -278,6 +278,13 @@ function Message({
           ) : (
             <>
               <p>{msg.text}</p>
+              {/* ✅ Scam Alert */}
+              {msg.scamAlert && (
+                <div className="mt-2 px-2 py-1.5 bg-danger/20 border border-danger/40 rounded text-xs font-mono text-danger flex items-start gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span>⚠️ Scam Warning ({msg.scamAlert.score}% risk) — {msg.scamAlert.reason}</span>
+                </div>
+              )}
               <div className={`flex items-center justify-end gap-1 mt-1 text-xs ${isMe ? 'text-void/60' : 'text-text-dim'}`}>
                 <span>{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                 {isMe && (msg.seen ? <CheckCheck className="w-3 h-3" /> : <Check className="w-3 h-3" />)}

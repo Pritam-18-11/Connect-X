@@ -10,6 +10,7 @@ const Group = require('../models/Group')
 const GroupMessage = require('../models/GroupMessage')
 const { checkAndUpdateLimit } = require('../utils/messageLimit')
 const { encrypt, decrypt } = require('../utils/encryption')
+const { analyzeMessageForScam } = require('../utils/scamDetector')
 
 const onlineUsers = new Map()
 
@@ -89,6 +90,10 @@ function initSocket(server) {
         }
 
         const cleanText = xss(text.trim())
+
+        // ✅ Scam Detection — private message
+        const scamResult = await analyzeMessageForScam(cleanText)
+
         const message = await Message.create({
           senderId: userId,
           receiverId,
@@ -105,6 +110,11 @@ function initSocket(server) {
           seen: false,
           isEdited: false,
           createdAt: message.createdAt,
+          scamAlert: scamResult.isScam ? {
+            score: scamResult.score,
+            category: scamResult.category,
+            reason: scamResult.reason,
+          } : null,
         }
 
         io.to(receiverId).emit('receive_message', msgData)
@@ -169,6 +179,10 @@ function initSocket(server) {
         if (!group.members.some((m) => m.toString() === userId)) return
 
         const cleanText = xss(text.trim())
+
+        // ✅ Scam Detection — group message
+        const scamResult = await analyzeMessageForScam(cleanText)
+
         const message = await GroupMessage.create({
           groupId,
           senderId: userId,
@@ -184,6 +198,12 @@ function initSocket(server) {
           messageType: 'text',
           isEdited: false,
           createdAt: message.createdAt,
+          // ✅ Scam alert group members ke pathao
+          scamAlert: scamResult.isScam ? {
+            score: scamResult.score,
+            category: scamResult.category,
+            reason: scamResult.reason,
+          } : null,
         }
 
         io.to(`group_${groupId}`).emit('receive_group_message', msgData)

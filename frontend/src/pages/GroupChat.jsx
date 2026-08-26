@@ -297,6 +297,14 @@ function GroupMsg({
           ) : (
             <>
               <p>{msg.text}</p>
+
+              {/* ✅ Scam Alert */}
+              {msg.scamAlert && (
+                <div className="mt-2 px-2 py-1.5 bg-red-500/20 border border-red-500/40 
+                rounded text-xs font-mono text-red-400 flex items-start gap-1.5">
+                <span>⚠️ Scam Warning ({msg.scamAlert.score}% risk) — {msg.scamAlert.reason}</span>
+                </div>
+              )}
               <p className={`text-xs mt-1 text-right ${isMe ? 'text-void/60' : 'text-text-dim'}`}>
                 {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </p>
