@@ -1,9 +1,8 @@
-const GROQ_TIMEOUT_MS = 10000
+const GROQ_TIMEOUT_MS = 15000
 
 async function analyzeMessageForScam(messageText) {
-  // Short messages skip করো
-  if (!messageText || messageText.trim().length < 10) {
-    return { isScam: false, score: 0, reason: null }
+  if (!messageText || messageText.trim().length < 5) {
+    return { scamScore: 0, category: 'safe', reason: 'Message too short to analyze.', advice: null }
   }
 
   const controller = new AbortController()
@@ -22,58 +21,62 @@ async function analyzeMessageForScam(messageText) {
         messages: [
           {
             role: 'system',
-            content: `You are a scam detection expert. Analyze messages for scam indicators.
+            content: `You are an expert scam detection AI. Analyze messages for scam indicators including suspicious links, phishing, lottery scams, job scams, financial fraud, and social engineering.
 
 IMPORTANT RULES:
-- Normal money discussions between friends/colleagues are NOT scams
-- Job offers, lottery wins, urgent bank alerts, suspicious links = HIGH scam probability
-- Only flag genuinely suspicious content
-- Consider context carefully before flagging
+- Normal money discussions between friends = NOT a scam
+- Urgent requests for money from strangers = HIGH scam
+- Suspicious links (bit.ly, tinyurl with promises) = HIGH scam
+- Lottery/prize wins = HIGH scam
+- "Click this link to claim reward" = HIGH scam
+- Job offers with upfront payment = HIGH scam
+- OTP requests = HIGH scam
+- Normal conversations = safe
 
-Respond ONLY with valid JSON, nothing else:
+Respond ONLY with valid JSON:
 {
   "scamScore": 0-100,
-  "isScam": true/false,
-  "category": "phishing/lottery/job_scam/suspicious_link/financial_fraud/safe",
-  "reason": "one short sentence explanation"
+  "category": "safe|phishing|lottery|job_scam|suspicious_link|financial_fraud|otp_fraud|social_engineering",
+  "reason": "one clear sentence explaining why",
+  "advice": "one clear sentence on what the user should do"
 }
 
-scamScore guide:
-0-30 = safe
-31-60 = suspicious  
-61-100 = high scam probability`,
+Score guide:
+0-24 = Not a scam
+25-34 = Unlikely scam
+35-60 = Suspicious
+61-100 = High scam probability`,
           },
           {
             role: 'user',
-            content: `Analyze this message: "${messageText}"`,
+            content: `Analyze this message for scam: "${messageText}"`,
           },
         ],
-        max_tokens: 150,
+        max_tokens: 200,
         temperature: 0.1,
       }),
     })
 
     clearTimeout(timer)
 
-    if (!response.ok) return { isScam: false, score: 0, reason: null }
+    if (!response.ok) throw new Error('API failed')
 
     const data = await response.json()
     const content = data.choices?.[0]?.message?.content?.trim()
-
-    if (!content) return { isScam: false, score: 0, reason: null }
+    if (!content) throw new Error('No content')
 
     const clean = content.replace(/```json|```/g, '').trim()
     const result = JSON.parse(clean)
 
     return {
-      isScam: result.scamScore >= 65,
-      score: result.scamScore || 0,
+      scamScore: result.scamScore || 0,
       category: result.category || 'safe',
-      reason: result.reason || null,
+      reason: result.reason || 'Analysis complete.',
+      advice: result.advice || null,
     }
   } catch (err) {
     clearTimeout(timer)
-    return { isScam: false, score: 0, reason: null }
+    return { scamScore: 0, category: 'safe', reason: 'Could not analyze.', advice: null }
   }
 }
 

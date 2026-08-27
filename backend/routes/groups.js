@@ -872,4 +872,33 @@ router.get('/:groupId/search/date', protect, async (req, res) => {
   }
 })
 
+// ── POST /api/groups/analyze-scam ─────────────────────────────
+router.post('/analyze-scam', protect, async (req, res) => {
+  try {
+    const { messageId } = req.body
+    if (!messageId) return res.status(400).json({ message: 'messageId is required.' })
+
+    const message = await GroupMessage.findById(messageId)
+    if (!message) return res.status(404).json({ message: 'Message not found.' })
+
+    const rawGroup = await Group.findById(message.groupId)
+    if (!rawGroup) return res.status(404).json({ message: 'Group not found.' })
+
+    // Only group members can analyze
+    if (!isMember(rawGroup, req.user._id)) {
+      return res.status(403).json({ message: 'Not a member.' })
+    }
+
+    const { analyzeMessageForScam } = require('../utils/scamDetector')
+    const { decrypt } = require('../utils/encryption')
+    const decryptedText = decrypt(message.text)
+    const result = await analyzeMessageForScam(decryptedText)
+
+    res.json(result)
+  } catch (err) {
+    console.error('Group analyze scam error:', err.message)
+    res.status(500).json({ message: 'Failed to analyze message.' })
+  }
+})
+
 module.exports = router

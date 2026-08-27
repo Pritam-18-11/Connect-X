@@ -467,4 +467,33 @@ router.delete('/:messageId', protect, async (req, res) => {
   }
 })
 
+// ── POST /api/chat/analyze-scam ───────────────────────────────
+router.post('/analyze-scam', protect, async (req, res) => {
+  try {
+    const { messageId } = req.body
+    if (!messageId) return res.status(400).json({ message: 'messageId is required.' })
+
+    const message = await Message.findById(messageId)
+    if (!message) return res.status(404).json({ message: 'Message not found.' })
+
+    // Only sender or receiver can analyze
+    const userId = req.user._id.toString()
+    if (
+      message.senderId.toString() !== userId &&
+      message.receiverId.toString() !== userId
+    ) {
+      return res.status(403).json({ message: 'Not authorized.' })
+    }
+
+    const { analyzeMessageForScam } = require('../utils/scamDetector')
+    const decryptedText = require('../utils/encryption').decrypt(message.text)
+    const result = await analyzeMessageForScam(decryptedText)
+
+    res.json(result)
+  } catch (err) {
+    console.error('Analyze scam error:', err.message)
+    res.status(500).json({ message: 'Failed to analyze message.' })
+  }
+})
+
 module.exports = router

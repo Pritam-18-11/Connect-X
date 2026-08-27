@@ -155,7 +155,7 @@ function VoiceBubble({ msg, isMe }) {
 }
 
 // ── Action menu ──────────────────────────────────────────────────
-function MessageActionMenu({ isMe, isVoice, isImage, onEdit, onDeleteMe, onDeleteEveryone, onClose, anchorRect }) {
+function MessageActionMenu({ isMe, isVoice, isImage, onEdit, onDeleteMe, onDeleteEveryone, onAnalyzeScam, onClose, anchorRect }) {
   const menuRef = useRef(null)
   const [style, setStyle] = useState({ top: 0, left: 0, visibility: 'hidden' })
 
@@ -206,6 +206,12 @@ function MessageActionMenu({ isMe, isVoice, isImage, onEdit, onDeleteMe, onDelet
           <Trash2 className="w-3.5 h-3.5" /> Delete for everyone
         </button>
       )}
+      <button
+        onClick={() => { onAnalyzeScam(); onClose() }}
+        className="w-full flex items-center gap-2.5 px-3 py-2 text-warn hover:bg-warn/10 text-xs font-mono transition-colors"
+      >
+        <AlertTriangle className="w-3.5 h-3.5" /> Check for Scam
+      </button>
     </div>
   )
 }
@@ -226,6 +232,22 @@ function Message({
   const [anchorRect, setAnchorRect] = useState(null)
   const triggerRef = useRef(null)
   const isEditing = editingId === msg._id
+
+  const [scamResult, setScamResult] = useState(null)
+  const [scamLoading, setScamLoading] = useState(false)
+
+  const analyzeScam = async () => {
+    setScamLoading(true)
+    setScamResult(null)
+    try {
+      const { data } = await api.post('/chat/analyze-scam', { messageId: msg._id })
+      setScamResult(data)
+    } catch (err) {
+      setScamResult({ scamScore: 0, category: 'error', reason: 'Failed to analyze.', advice: null })
+    } finally {
+      setScamLoading(false)
+    }
+  }
 
   const openMenu = (e) => {
     e.stopPropagation()
@@ -278,11 +300,11 @@ function Message({
           ) : (
             <>
               <p>{msg.text}</p>
-              {/* ✅ Scam Alert */}
+              {/* Auto scam alert (from real-time socket) */}
               {msg.scamAlert && (
                 <div className="mt-2 px-2 py-1.5 bg-danger/20 border border-danger/40 rounded text-xs font-mono text-danger flex items-start gap-1.5">
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                <span>⚠️ Scam Warning ({msg.scamAlert.score}% risk) — {msg.scamAlert.reason}</span>
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span>⚠️ Scam Warning ({msg.scamAlert.score}% risk) — {msg.scamAlert.reason}</span>
                 </div>
               )}
               <div className={`flex items-center justify-end gap-1 mt-1 text-xs ${isMe ? 'text-void/60' : 'text-text-dim'}`}>
@@ -290,6 +312,50 @@ function Message({
                 {isMe && (msg.seen ? <CheckCheck className="w-3 h-3" /> : <Check className="w-3 h-3" />)}
               </div>
             </>
+          )}
+
+          {/* Manual scam check loading */}
+          {scamLoading && (
+            <div className="mt-2 px-3 py-2 bg-panel border border-border rounded text-xs font-mono text-text-dim flex items-center gap-2">
+              <div className="w-3 h-3 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+              Analyzing message...
+            </div>
+          )}
+
+          {/* Manual scam check result */}
+          {scamResult && !scamLoading && (
+            <div className={`mt-2 px-3 py-2.5 rounded border text-xs font-mono space-y-1.5 ${
+              scamResult.scamScore >= 61
+                ? 'bg-danger/15 border-danger/40 text-danger'
+                : scamResult.scamScore >= 35
+                ? 'bg-warn/15 border-warn/40 text-warn'
+                : 'bg-success/15 border-success/40 text-success'
+            }`}>
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-sm">
+                  {scamResult.scamScore >= 61
+                    ? '🚨 High Scam Risk'
+                    : scamResult.scamScore >= 35
+                    ? '⚠️ Suspicious'
+                    : scamResult.scamScore >= 25
+                    ? '🟡 Unlikely Scam'
+                    : '✅ Not a Scam'}
+                </span>
+                <span className="font-bold">{scamResult.scamScore}%</span>
+              </div>
+              <p className="text-xs opacity-90">{scamResult.reason}</p>
+              {scamResult.advice && (
+                <p className="text-xs opacity-80 border-t border-current/20 pt-1.5">
+                  💡 {scamResult.advice}
+                </p>
+              )}
+              <button
+                onClick={() => setScamResult(null)}
+                className="text-xs opacity-60 hover:opacity-100 mt-1"
+              >
+                Dismiss
+              </button>
+            </div>
           )}
         </div>
 
@@ -312,6 +378,7 @@ function Message({
             onEdit={() => onEdit(msg)}
             onDeleteMe={() => onDeleteMe(msg._id)}
             onDeleteEveryone={() => onDeleteEveryone(msg._id)}
+            onAnalyzeScam={analyzeScam}
             onClose={() => setShowMenu(false)}
           />
         )}
@@ -408,11 +475,11 @@ export default function ChatWindow() {
   const imageInputRef = useRef(null)
 
   // AI Assistant state
-  const [aiAssistantStatus, setAiAssistantStatus] = useState('none') // none | pending | enabled
+  const [aiAssistantStatus, setAiAssistantStatus] = useState('none')
   const [aiAssistantRequestedBy, setAiAssistantRequestedBy] = useState(null)
   const [requestingAi, setRequestingAi] = useState(false)
   const [respondingAi, setRespondingAi] = useState(false)
-  const unreadSnapshotRef = useRef([]) // message IDs unread at the moment the chat was opened
+  const unreadSnapshotRef = useRef([])
 
   const [showAskAiModal, setShowAskAiModal] = useState(false)
   const [askQuestion, setAskQuestion] = useState('')
@@ -434,7 +501,7 @@ export default function ChatWindow() {
   useEffect(() => {
     if (otherUserId) clearUnread(otherUserId)
   }, [otherUserId])
-  
+
   useEffect(() => {
     return () => {
       leaveChat()
@@ -458,9 +525,6 @@ export default function ChatWindow() {
           return
         }
 
-        // Snapshot which messages are still unread RIGHT NOW, before the
-        // seen-all call below marks everything as seen — this snapshot is
-        // what "Summarize Unread Messages" will actually use.
         unreadSnapshotRef.current = msgRes.data
           .filter(
             (m) =>
@@ -475,9 +539,8 @@ export default function ChatWindow() {
         setAiAssistantStatus(statusRes.data.aiAssistantStatus || 'none')
         setAiAssistantRequestedBy(statusRes.data.aiAssistantRequestedBy || null)
 
-        // Mark any previously-unread messages from this user as seen now that
-        // the chat window is actually open (fixes stale unread badges)
         api.put(`/chat/seen-all/${otherUserId}`).catch((err) => console.error('Mark all seen error:', err))
+
         const conn = connRes.data.find((c) => c.userId.toString() === otherUserId)
         if (conn) setOtherUser(conn)
 
