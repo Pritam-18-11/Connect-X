@@ -173,8 +173,45 @@ function VoiceBubble({ msg, isMe }) {
   )
 }
 
+function ScamResultPanel({ result, onDismiss }) {
+  const score = result.scamScore
+  const colorClass =
+    score >= 61
+      ? 'bg-danger/15 border-danger/40 text-danger'
+      : score >= 35
+      ? 'bg-warn/15 border-warn/40 text-warn'
+      : 'bg-success/15 border-success/40 text-success'
+
+  const label =
+    score >= 61
+      ? '🚨 High Scam Risk'
+      : score >= 35
+      ? '⚠️ Suspicious'
+      : score >= 25
+      ? '🟡 Unlikely Scam'
+      : '✅ Not a Scam'
+
+  return (
+    <div className={`mt-2 px-3 py-2.5 rounded border text-xs font-mono space-y-1.5 ${colorClass}`}>
+      <div className="flex items-center justify-between">
+        <span className="font-bold">{label}</span>
+        <span className="font-bold">{score}%</span>
+      </div>
+      {result.reason && <p className="opacity-90">{result.reason}</p>}
+      {result.advice && (
+        <p className="opacity-80 border-t border-current/20 pt-1.5">
+          💡 {result.advice}
+        </p>
+      )}
+      <button onClick={onDismiss} className="opacity-60 hover:opacity-100 text-xs mt-0.5">
+        Dismiss
+      </button>
+    </div>
+  )
+}
+
 // ── Message Action Menu ───────────────────────────────────────
-function MessageActionMenu({ isMe, isVoice, isImage, canCreatorDelete, onEdit, onDeleteMe, onDeleteEveryone, onClose, anchorRect }) {
+function MessageActionMenu({ isMe, isVoice, isImage, canCreatorDelete, onEdit, onDeleteMe, onDeleteEveryone, onAnalyzeScam, onClose, anchorRect }) {
   const menuRef = useRef(null)
   const [style, setStyle] = useState({ top: 0, left: 0, visibility: 'hidden' })
 
@@ -219,6 +256,14 @@ function MessageActionMenu({ isMe, isVoice, isImage, canCreatorDelete, onEdit, o
           <Trash2 className="w-3.5 h-3.5" /> Delete for everyone
         </button>
       )}
+      {!isVoice && !isImage && (
+        <button
+          onClick={() => { onAnalyzeScam(); onClose() }}
+          className="w-full flex items-center gap-2.5 px-3 py-2 text-warn hover:bg-warn/10 text-xs font-mono transition-colors"
+        >
+        <AlertTriangle className="w-3.5 h-3.5" /> Check for Scam
+        </button>
+      )}
     </div>
   )
 }
@@ -235,6 +280,8 @@ function GroupMsg({
   const isVoice = msg.messageType === 'voice'
   const isImage = msg.messageType === 'image'
   const [showMenu, setShowMenu] = useState(false)
+  const [scamResult, setScamResult] = useState(null)
+  const [scamLoading, setScamLoading] = useState(false)
   const [anchorRect, setAnchorRect] = useState(null)
   const triggerRef = useRef(null)
   const isEditing = editingId === msg._id
@@ -246,7 +293,23 @@ function GroupMsg({
     setAnchorRect(rect)
     setShowMenu((v) => !v)
   }
-
+  const analyzeScam = async () => {
+    setScamLoading(true)
+    setScamResult(null)
+    try {
+      const { data } = await api.post('/groups/analyze-scam', { messageId: msg._id })
+      setScamResult(data)
+    } catch (err) {
+      setScamResult({
+        scamScore: 0,
+        category: 'error',
+        reason: 'Failed to analyze message.',
+        advice: null,
+      })
+    } finally {
+      setScamLoading(false)
+    }
+  }
   return (
     <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-3 group`}>
       <div className={`relative max-w-xs lg:max-w-sm ${!isMe ? 'space-y-1' : ''}`}>
@@ -332,6 +395,7 @@ function GroupMsg({
             onEdit={() => onEdit(msg)}
             onDeleteMe={() => onDeleteMe(msg._id)}
             onDeleteEveryone={() => onDeleteEveryone(msg._id)}
+            onAnalyzeScam={analyzeScam}
             onClose={() => setShowMenu(false)}
           />
         )}
@@ -402,6 +466,44 @@ function SearchResultCard({ msg, searchTab, keyword, onClick }) {
   )
 }
 
+// ── Scam Result Panel ─────────────────────────────────────────
+function ScamResultPanel({ result, onDismiss }) {
+  const score = result.scamScore
+  const colorClass =
+    score >= 61
+      ? 'bg-danger/15 border-danger/40 text-danger'
+      : score >= 35
+      ? 'bg-warn/15 border-warn/40 text-warn'
+      : 'bg-success/15 border-success/40 text-success'
+
+  const label =
+    score >= 61
+      ? '🚨 High Scam Risk'
+      : score >= 35
+      ? '⚠️ Suspicious'
+      : score >= 25
+      ? '🟡 Unlikely Scam'
+      : '✅ Not a Scam'
+
+  return (
+    <div className={`mt-2 px-3 py-2.5 rounded border text-xs font-mono space-y-1.5 ${colorClass}`}>
+      <div className="flex items-center justify-between">
+        <span className="font-bold">{label}</span>
+        <span className="font-bold">{score}%</span>
+      </div>
+      {result.reason && <p className="opacity-90">{result.reason}</p>}
+      {result.advice && (
+        <p className="opacity-80 border-t border-current/20 pt-1.5">
+          💡 {result.advice}
+        </p>
+      )}
+      <button onClick={onDismiss} className="opacity-60 hover:opacity-100 text-xs mt-0.5">
+        Dismiss
+      </button>
+    </div>
+  )
+}
+
 // ── Main GroupChat Component ──────────────────────────────────
 export default function GroupChat() {
   const { id: groupId } = useParams()
@@ -415,6 +517,8 @@ export default function GroupChat() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showMenu, setShowMenu] = useState(false)
+  const [scamResult, setScamResult] = useState(null)
+  const [scamLoading, setScamLoading] = useState(false)
   const [showMembersModal, setShowMembersModal] = useState(false)
   const [showInviteModal, setShowInviteModal] = useState(false)
   const [connections, setConnections] = useState([])
@@ -1080,6 +1184,16 @@ export default function GroupChat() {
               className="p-2 rounded hover:bg-void text-text-dim hover:text-text transition-colors">
               <MoreVertical className="w-4 h-4" />
             </button>
+            {scamLoading && (
+              <div className="mt-2 px-3 py-2 bg-panel border border-border rounded text-xs font-mono text-text-dim flex items-center gap-2">
+                <div className="w-3 h-3 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+                Analyzing message...
+              </div>
+            )}
+
+            {scamResult && !scamLoading && (
+              <ScamResultPanel result={scamResult} onDismiss={() => setScamResult(null)} />
+            )}
             {showMenu && (
               <div className="absolute top-10 right-0 w-56 panel border border-border z-20 py-1">
                 <button onClick={() => { copyLink(); setShowMenu(false) }}
